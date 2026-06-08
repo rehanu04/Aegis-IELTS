@@ -286,6 +286,7 @@ private fun WritingActiveWorkspace(
                             .weight(1f)
                             .fillMaxWidth()
                             .background(SurfaceSlateLight)
+                            .imePadding()
                     ) {
                         WritingEditorPanel(
                             essayTextFlow = essayTextFlow,

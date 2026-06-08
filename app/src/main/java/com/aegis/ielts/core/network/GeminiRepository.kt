@@ -147,9 +147,12 @@ class GeminiRepository @Inject constructor(
         try {
             val url = URL("${GeminiApiClient.BACKEND_URL}/docs")
             val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
+            conn.requestMethod = "POST"
             conn.connectTimeout = 60000 // High timeout for cold start
             conn.readTimeout = 60000
+            conn.doOutput = true
+            conn.setFixedLengthStreamingMode(0)
+            conn.outputStream.use { it.write(byteArrayOf()) }
             conn.connect()
             
             if (conn.responseCode in 200..499) {

@@ -110,7 +110,8 @@ class AudioPlaybackEngine @Inject constructor(
      * @param assetPath  Relative path within assets/, e.g. "audio/part1_intro.mp3"
      */
     suspend fun playFromAsset(assetPath: String) {
-        playFromUri(Uri.parse("file:///android_asset/$assetPath"))
+        val cleanPath = assetPath.replace("asset:///", "")
+        playFromUri(Uri.parse("file:///android_asset/$cleanPath"))
     }
 
     /** Stops playback and resets state to Idle. */
