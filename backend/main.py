@@ -1,0 +1,399 @@
+import os
+import math
+import logging
+from typing import List, Optional
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, field_validator
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
+
+# --- Logging Configuration ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("aegis-ielts-backend")
+
+app = FastAPI(
+    title="Aegis IELTS Evaluation Gateway",
+    description="Official 2026 FastAPI gateway for Aegis IELTS Speaking and Writing assessments",
+    version="1.0.0"
+)
+
+# Enable CORS for local Android Emulator (10.0.2.2) and local debugging
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Initialize Google GenAI SDK Client ---
+api_key = os.getenv("GEMINI_API_KEY")
+client = None
+
+if not api_key:
+    logger.warning("GEMINI_API_KEY environment variable is missing. The gateway will run in LOCAL MOCK FALLBACK mode.")
+else:
+    try:
+        # Initializing the 2026 Google GenAI client
+        client = genai.Client(api_key=api_key)
+        logger.info("Google GenAI Client successfully initialized.")
+    except Exception as e:
+        logger.error(f"Failed to initialize Google GenAI Client: {e}. Falling back to local mock.")
+
+# ─── Pydantic Validation Schemas ───────────────────────────────────────────────
+
+class SpeakingGradeRequest(BaseModel):
+    audio_base64: str = Field(..., description="Base64 encoded PCM/WAV audio bytes")
+    transcript: str = Field(..., description="Candidate STT transcript block")
+    prompts: List[str] = Field(..., description="Ordered list of examiner questions presented")
+
+class WritingGradeRequest(BaseModel):
+    task_type: int = Field(..., ge=1, le=2, description="1 = Academic Task 1, 2 = Academic Task 2")
+    prompt: str = Field(..., description="Prompt instructions shown to candidate")
+    essay: str = Field(..., description="Candidate written essay body text")
+
+class BandCalculationRequest(BaseModel):
+    scores: List[float] = Field(..., description="Component IELTS scores (0.0 to 9.0)")
+
+    @field_validator("scores")
+    @classmethod
+    def validate_scores(cls, v: List[float]) -> List[float]:
+        if not v:
+            raise ValueError("Scores list cannot be empty")
+        for score in v:
+            if not (0.0 <= score <= 9.0):
+                raise ValueError(f"Score {score} must be between 0.0 and 9.0")
+            # Verify 0.5 steps
+            if (score * 2.0) != int(score * 2.0):
+                raise ValueError(f"Score {score} must be in exact 0.5 steps (e.g. 6.0, 6.5, 7.0)")
+        return v
+
+# --- Nested Speaking Telemetry Responses ---
+
+class HesitationProfile(BaseModel):
+    within_clause_pauses: int = Field(..., alias="withinClausePauses", description="Count of unnatural pauses inside syntactic clauses")
+    between_clause_pauses: int = Field(..., alias="betweenClausePauses", description="Count of normal pauses between clauses")
+    total_silence_ms: int = Field(..., alias="totalSilenceMs", description="Total silent interval in milliseconds")
+
+    class Config:
+        populate_by_name = True
+
+class FluencyCoherenceMetric(BaseModel):
+    score: float = Field(..., ge=0.0, le=9.0)
+    feedback: str
+    hesitation_profile: HesitationProfile = Field(..., alias="hesitationProfile")
+    filler_density_index: float = Field(..., ge=0.0, alias="fillerDensityIndex", description="Filler word frequency per 100 words")
+
+    class Config:
+        populate_by_name = True
+
+class LexicalAssessmentMetric(BaseModel):
+    score: float = Field(..., ge=0.0, le=9.0)
+    feedback: str
+    lexical_asymmetry_index: float = Field(..., ge=0.0, alias="lexicalAsymmetryIndex")
+
+    class Config:
+        populate_by_name = True
+
+class GrammarAssessmentMetric(BaseModel):
+    score: float = Field(..., ge=0.0, le=9.0)
+    feedback: str
+
+class PronunciationAssessmentMetric(BaseModel):
+    score: float = Field(..., ge=0.0, le=9.0)
+    feedback: str
+
+class SpeakingAssessmentResponse(BaseModel):
+    fluency_coherence: FluencyCoherenceMetric = Field(..., alias="fluencyCoherence")
+    lexical_resource: LexicalAssessmentMetric = Field(..., alias="lexicalResource")
+    grammatical_range_accuracy: GrammarAssessmentMetric = Field(..., alias="grammaticalRangeAccuracy")
+    pronunciation: PronunciationAssessmentMetric = Field(..., alias="pronunciation")
+    overall_feedback: str = Field(..., alias="overallFeedback")
+
+    class Config:
+        populate_by_name = True
+
+# --- Nested Writing Telemetry Responses ---
+
+class WritingCriteriaScores(BaseModel):
+    task_achievement: float = Field(..., ge=0.0, le=9.0, alias="taskAchievement")
+    coherence_cohesion: float = Field(..., ge=0.0, le=9.0, alias="coherenceCohesion")
+    lexical_resource: float = Field(..., ge=0.0, le=9.0, alias="lexicalResource")
+    grammatical_range_accuracy: float = Field(..., ge=0.0, le=9.0, alias="grammaticalRangeAccuracy")
+
+    class Config:
+        populate_by_name = True
+
+class TemplateDetectionResult(BaseModel):
+    template_detected: bool = Field(..., alias="templateDetected")
+    template_similarity_score: float = Field(..., ge=0.0, le=1.0, alias="templateSimilarityScore")
+    lexical_asymmetry_index: float = Field(..., ge=0.0, alias="lexicalAsymmetryIndex")
+
+    class Config:
+        populate_by_name = True
+
+class GrammarCorrection(BaseModel):
+    original: str
+    corrected: str
+    explanation: str
+    error_type: str = Field(..., alias="errorType")
+
+    class Config:
+        populate_by_name = True
+
+class WritingAssessmentResponse(BaseModel):
+    criteria_scores: WritingCriteriaScores = Field(..., alias="criteriaScores")
+    template_detection: TemplateDetectionResult = Field(..., alias="templateDetection")
+    grammar_corrections: List[GrammarCorrection] = Field(default=[], alias="grammarCorrections")
+    overall_feedback: str = Field(..., alias="overallFeedback")
+
+    class Config:
+        populate_by_name = True
+
+# ─── REST Routing Endpoints ───────────────────────────────────────────────────
+
+@app.post("/api/v1/grade/writing", response_model=WritingAssessmentResponse)
+async def grade_writing(request: WritingGradeRequest):
+    """
+    Grades an IELTS essay by stripping templates, checking word count,
+    and evaluating task criteria using gemini-2.5-pro.
+    """
+    logger.info(f"Received writing grade request for Task {request.task_type}")
+
+    system_instruction = """
+    You are a certified IELTS Writing examiner. Evaluate the essay response.
+
+    First, identify and strip any formulaic essay template sentences (e.g., memorized introductory or transitional sentences like "It is often argued that", "This essay will discuss both sides").
+    Count the words in the remaining organic content. If it is below the minimum limit (150 for Task 1, 250 for Task 2), penalize the Task Achievement score.
+
+    Assess template usage: set template_detected=true if formulaic memorized structures are used, and estimate the template_similarity_score (0.0 = completely original, 1.0 = pure template).
+    Identify grammar errors and provide corrections.
+    """
+
+    user_prompt = f"""
+    Evaluate this IELTS Writing Task {request.task_type} response.
+    Task Prompt: "{request.prompt}"
+    Candidate Essay: "{request.essay}"
+    """
+
+    if client:
+        try:
+            # Enforcing strict Pydantic schema using Google GenAI SDK config
+            response = client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                    response_schema=WritingAssessmentResponse
+                )
+            )
+
+            if response.text:
+                parsed = WritingAssessmentResponse.model_validate_json(response.text)
+                return JSONResponse(content=parsed.model_dump(by_alias=True))
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Gemini API returned an empty text payload."
+                )
+
+        except APIError as api_err:
+            logger.error(f"Gemini API Error: {api_err}. Running local fallback.")
+        except Exception as e:
+            logger.error(f"Error during Gemini generation: {e}. Running local fallback.")
+
+    # Local Fallback
+    return local_writing_assessment(request.task_type, request.essay)
+
+
+@app.post("/api/v1/grade/speaking", response_model=SpeakingAssessmentResponse)
+async def grade_speaking(request: SpeakingGradeRequest):
+    """
+    Grades IELTS speaking transcripts by evaluating hesitation pauses
+    and counting filler word frequencies.
+    """
+    logger.info("Received speaking grade request")
+
+    system_instruction = """
+    You are a certified IELTS Speaking examiner. Evaluate the candidate's performance
+    across all 4 official IELTS Speaking criteria, adhering to the strict 2026 structural metrics.
+
+    Score each criterion on the official 0.0-9.0 scale with 0.5 precision.
+
+    Analyze the hesitation profile:
+    - within_clause_pauses: Unnatural pauses that occur inside grammatical clauses (not between clauses).
+    - between_clause_pauses: Natural transition pauses between clauses.
+    - total_silence_ms: Sum of silence intervals.
+
+    Compute the filler density index: count of filler words (um, ah, like, you know) per 100 words.
+    Compute the lexical asymmetry index: imbalance in vocabulary complexity (ratio of complex to simple words).
+
+    Enforce hesitation penalties: if within_clause_pauses is high, fluency score must be penalized.
+    """
+
+    user_prompt = f"""
+    Evaluate the speaking session:
+    Examiner Prompts: {request.prompts}
+    Candidate Transcript: "{request.transcript}"
+    """
+
+    if client:
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3,
+                    response_mime_type="application/json",
+                    response_schema=SpeakingAssessmentResponse
+                )
+            )
+
+            if response.text:
+                parsed = SpeakingAssessmentResponse.model_validate_json(response.text)
+                return JSONResponse(content=parsed.model_dump(by_alias=True))
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Gemini API returned an empty text payload."
+                )
+
+        except APIError as api_err:
+            logger.error(f"Gemini API Error: {api_err}. Running local fallback.")
+        except Exception as e:
+            logger.error(f"Error during Gemini generation: {e}. Running local fallback.")
+
+    # Local Fallback
+    return local_speaking_assessment(request.transcript)
+
+
+@app.post("/api/v1/calculate-band")
+async def calculate_band(request: BandCalculationRequest):
+    """
+    Validates individual component scores and implements the official rounding formula:
+    rounded = math.floor((2.0 * raw_average) + 0.5) / 2.0
+    """
+    logger.info(f"Received band calculation request for scores: {request.scores}")
+    raw_average = sum(request.scores) / len(request.scores)
+    rounded = math.floor((2.0 * raw_average) + 0.5) / 2.0
+    return {
+        "raw_average": round(raw_average, 3),
+        "band_score": rounded
+    }
+
+
+# ─── Mock Fallback Engines ────────────────────────────────────────────────────
+
+def local_writing_assessment(task_type: int, essay: str) -> WritingAssessmentResponse:
+    logger.info("Running local mock writing evaluation fallback")
+    words = essay.strip().split()
+    word_count = len(words)
+    min_words = 150 if task_type == 1 else 250
+
+    word_fraction = min(1.0, word_count / min_words) if min_words > 0 else 1.0
+    ta_score = round(word_fraction * 7.5 * 2) / 2.0
+    ta_score = max(1.0, min(9.0, ta_score))
+
+    unique_words = len(set(w.lower() for w in words))
+    diversity = unique_words / word_count if word_count > 0 else 0
+    lex_score = round(diversity * 10.0 * 2) / 2.0
+    lex_score = max(1.0, min(9.0, lex_score))
+
+    cc_score = 6.0 if word_count > 50 else 3.0
+    gra_score = 6.5 if word_count > 100 else 2.5
+
+    # Check template usage
+    templates = ["it is often argued that", "on the one hand", "on the other hand", "in conclusion"]
+    lower_essay = essay.lower()
+    matches = sum(1 for t in templates if t in lower_essay)
+    similarity = min(1.0, matches / len(templates))
+    template_detected = similarity > 0.35
+
+    feedback = f"Local Mock Evaluation: Essay analyzed with {word_count} words. "
+    if word_count < min_words:
+        feedback += f"Word count falls short of the required {min_words} minimum limit, which reduced your Task Achievement score."
+    else:
+        feedback += "Word count requirement met."
+
+    corrections = []
+    if word_count > 10:
+        corrections.append(
+            GrammarCorrection(
+                original="is be",
+                corrected="is",
+                explanation="Auxiliary duplication: avoid placing base form be directly after is.",
+                errorType="Verb Agreement"
+            )
+        )
+
+    return WritingAssessmentResponse(
+        criteriaScores=WritingCriteriaScores(
+            taskAchievement=ta_score,
+            coherenceCohesion=cc_score,
+            lexicalResource=lex_score,
+            grammaticalRangeAccuracy=gra_score
+        ),
+        templateDetection=TemplateDetectionResult(
+            templateDetected=template_detected,
+            templateSimilarityScore=similarity,
+            lexicalAsymmetryIndex=0.25
+        ),
+        grammarCorrections=corrections,
+        overallFeedback=feedback
+    )
+
+
+def local_speaking_assessment(transcript: str) -> SpeakingAssessmentResponse:
+    logger.info("Running local mock speaking evaluation fallback")
+    words = transcript.strip().split()
+    word_count = len(words)
+
+    # Detect hesitation pauses and fillers
+    fillers = ["um", "ah", "like", "you know"]
+    lower_trans = transcript.lower()
+    filler_count = sum(lower_trans.count(f) for f in fillers)
+    filler_density = (filler_count / word_count * 100) if word_count > 0 else 0.0
+
+    within_pauses = lower_trans.count("[pause]")
+    between_pauses = max(0, int(word_count / 15) - within_pauses)
+
+    fluency = max(1.0, min(9.0, round((7.0 - (within_pauses * 0.5)) * 2) / 2.0))
+    lexical = 6.5 if word_count > 30 else 3.0
+    grammar = 6.0 if word_count > 40 else 2.5
+    pron = 7.0 if word_count > 20 else 3.0
+
+    return SpeakingAssessmentResponse(
+        fluencyCoherence=FluencyCoherenceMetric(
+            score=fluency,
+            feedback="Speech exhibits cohesive flow with normal pauses, but hesitation markers are present.",
+            hesitationProfile=HesitationProfile(
+                withinClausePauses=within_pauses,
+                betweenClausePauses=between_pauses,
+                totalSilenceMs=within_pauses * 800
+            ),
+            fillerDensityIndex=filler_density
+        ),
+        lexicalResource=LexicalAssessmentMetric(
+            score=lexical,
+            feedback="Vocabulary is sufficient to discuss general topics, with some repetitive lexical choices.",
+            lexicalAsymmetryIndex=0.3
+        ),
+        grammaticalRangeAccuracy=GrammarAssessmentMetric(
+            score=grammar,
+            feedback="Maintains reasonable sentence patterns, with minor syntax errors under speech pressure."
+        ),
+        pronunciation=PronunciationAssessmentMetric(
+            score=pron,
+            feedback="Vowel clarity is consistent; word stress is accurate overall."
+        ),
+        overallFeedback="Local Mock Evaluation: Candidate transcript evaluated successfully."
+    )
