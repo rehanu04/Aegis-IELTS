@@ -85,11 +85,22 @@ class SpeakingViewModel @Inject constructor(
         if (_uiState.value is SpeakingUiState.MockTestActive) return
         
         _uiState.value = SpeakingUiState.MockTestActive(
-            engineState = ExaminerEngineState.EXAMINER_SPEAKING
+            engineState = ExaminerEngineState.CONNECTING
         )
         
         stateMachineJob?.cancel()
         stateMachineJob = viewModelScope.launch {
+            // Step 0: Ping Render backend to wake it up
+            val pingResult = geminiRepository.pingBackend()
+            if (pingResult.isFailure) {
+                _uiState.value = SpeakingUiState.Error("Server is currently unavailable. Please try again.")
+                return@launch
+            }
+
+            _uiState.value = SpeakingUiState.MockTestActive(
+                engineState = ExaminerEngineState.EXAMINER_SPEAKING
+            )
+            
             // Step 1: Examiner speaking phase
             // We attempt to play an asset. If it fails (e.g. missing file), we catch the error 
             // and proceed to the next state to ensure the pipeline doesn't hang.

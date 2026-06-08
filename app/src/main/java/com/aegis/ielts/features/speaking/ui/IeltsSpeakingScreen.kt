@@ -183,7 +183,7 @@ fun IeltsSpeakingAssessmentScreen(
                         // Interactive Orb Driver mapping to high-precision telemetry states
                         Box(modifier = Modifier.fillMaxWidth().height(320.dp), contentAlignment = Alignment.Center) {
                             ParticleBlobOrb(
-                                isThinking = state.engineState == ExaminerEngineState.ANALYZING,
+                                isThinking = state.engineState == ExaminerEngineState.ANALYZING || state.engineState == ExaminerEngineState.CONNECTING,
                                 isTalking = state.engineState == ExaminerEngineState.EXAMINER_SPEAKING,
                                 isListening = state.engineState == ExaminerEngineState.CANDIDATE_RECORDING
                             )
@@ -193,6 +193,7 @@ fun IeltsSpeakingAssessmentScreen(
 
                         // Responsive Status Sub-Labels
                         val diagnosticText = when (state.engineState) {
+                            ExaminerEngineState.CONNECTING -> "CONNECTING TO EVALUATION SERVER..."
                             ExaminerEngineState.EXAMINER_SPEAKING -> "EXAMINER DELIVERY ACTIVE"
                             ExaminerEngineState.CANDIDATE_RECORDING -> "LIVE AUDIO PIPELINE RECORDING"
                             ExaminerEngineState.ANALYZING -> "PARSING CRITERIA WEIGHTS..."
@@ -200,6 +201,7 @@ fun IeltsSpeakingAssessmentScreen(
 
                         val diagnosticColor by animateColorAsState(
                             targetValue = when (state.engineState) {
+                                ExaminerEngineState.CONNECTING -> Color(0xFF8B5CF6)
                                 ExaminerEngineState.EXAMINER_SPEAKING -> surfaceCyan
                                 ExaminerEngineState.CANDIDATE_RECORDING -> Color(0xFF10B981)
                                 ExaminerEngineState.ANALYZING -> Color(0xFFD4AF37)

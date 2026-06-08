@@ -49,6 +49,9 @@ sealed class SpeakingUiState {
  */
 enum class ExaminerEngineState {
 
+    /** Waking up the Render backend from cold-start dormancy. */
+    CONNECTING,
+
     /** Gemini TTS is delivering the examiner question or cue card. */
     EXAMINER_SPEAKING,
 

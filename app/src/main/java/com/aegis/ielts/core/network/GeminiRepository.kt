@@ -124,7 +124,11 @@ class GeminiRepository @Inject constructor(
             val responseCode = conn.responseCode
             if (responseCode in 200..299) {
                 val jsonResponse = conn.inputStream.bufferedReader().use { it.readText() }
-                json.decodeFromString<Res>(jsonResponse)
+                try {
+                    json.decodeFromString<Res>(jsonResponse)
+                } catch (e: Exception) {
+                    throw IOException("JSON Parsing Error: ${e.message}\nRaw Response: $jsonResponse", e)
+                }
             } else {
                 val errorMsg = conn.errorStream?.bufferedReader()?.use { it.readText() } 
                     ?: "Response code: $responseCode"
@@ -132,6 +136,29 @@ class GeminiRepository @Inject constructor(
             }
         } finally {
             conn.disconnect()
+        }
+    }
+
+    /**
+     * Wakes up the Render backend to overcome cold-start dormancy (15 mins inactivity).
+     * Fires a lightweight GET request to the /docs endpoint with a high timeout.
+     */
+    suspend fun pingBackend(): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("${GeminiApiClient.BACKEND_URL}/docs")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 60000 // High timeout for cold start
+            conn.readTimeout = 60000
+            conn.connect()
+            
+            if (conn.responseCode in 200..499) {
+                Result.success(Unit)
+            } else {
+                Result.failure(IOException("Backend failed to wake up: ${conn.responseCode}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
