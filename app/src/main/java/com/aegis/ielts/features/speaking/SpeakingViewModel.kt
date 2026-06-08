@@ -32,7 +32,8 @@ import javax.inject.Inject
 class SpeakingViewModel @Inject constructor(
     private val geminiRepository    : GeminiRepository,
     private val audioCaptureEngine  : AudioCaptureEngine,
-    private val audioPlaybackEngine : AudioPlaybackEngine
+    private val audioPlaybackEngine : AudioPlaybackEngine,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context
 ) : ViewModel() {
 
     // ─── UI State ─────────────────────────────────────────────────────────────
@@ -90,10 +91,17 @@ class SpeakingViewModel @Inject constructor(
         
         stateMachineJob?.cancel()
         stateMachineJob = viewModelScope.launch {
-            // Step 0: Ping Render backend to wake it up
+            // Step 0: Check internet connection and ping Render backend to wake it up
+            val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            val network = connectivityManager?.activeNetwork
+            if (network == null) {
+                _uiState.value = SpeakingUiState.Error("Device Offline: Please check your internet connection and try again.")
+                return@launch
+            }
+
             val pingResult = geminiRepository.pingBackend()
             if (pingResult.isFailure) {
-                _uiState.value = SpeakingUiState.Error("Server is currently unavailable. Please try again.")
+                _uiState.value = SpeakingUiState.Error("Server Offline: Backend is currently unavailable. Please try again later.")
                 return@launch
             }
 

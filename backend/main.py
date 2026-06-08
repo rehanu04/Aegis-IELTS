@@ -166,6 +166,12 @@ async def grade_writing(request: WritingGradeRequest):
     """
     logger.info(f"Received writing grade request for Task {request.task_type}")
 
+    if not request.essay or len(request.essay.split()) < 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Essay too short or empty. Please write a substantial response."
+        )
+
     system_instruction = """
     You are a certified IELTS Writing examiner. Evaluate the essay response.
 

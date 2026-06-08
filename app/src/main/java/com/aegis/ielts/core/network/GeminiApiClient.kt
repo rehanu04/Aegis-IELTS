@@ -21,7 +21,7 @@ import com.google.ai.client.generativeai.type.generationConfig
 object GeminiApiClient {
 
     const val BYPASS_DIRECT_GEMINI = true
-    const val BACKEND_URL = "http://10.0.2.2:8000"
+    const val BACKEND_URL = "https://aegis-ielts-api.onrender.com"
 
     private const val MODEL_NAME = "gemini-2.0-flash"
 

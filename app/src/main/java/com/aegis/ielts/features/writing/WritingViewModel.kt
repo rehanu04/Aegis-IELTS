@@ -81,13 +81,18 @@ class WritingViewModel @Inject constructor(
         val currentState = _uiState.value as? WritingUiState.MockTestActive ?: return
         if (currentState.isFrozen) return
 
+        val essay = _essayText.value
+        if (essay.trim().isEmpty()) {
+            _uiState.value = WritingUiState.Error("Your essay submission is empty. Please write a response before submitting.")
+            return
+        }
+
         stopTimer()
 
         // Lock workspace inputs
         _uiState.value = currentState.copy(isFrozen = true)
 
         val task = currentState.task
-        val essay = _essayText.value
 
         _uiState.value = WritingUiState.Analyzing
 
