@@ -401,7 +401,7 @@ private fun ListeningActiveContent(
                             modifier = Modifier.fillMaxWidth().height(50.dp)
                         ) {
                             Text(
-                                text = "Start Listening Section",
+                                text = "Start Test",
                                 color = SurfaceSlate,
                                 fontWeight = FontWeight.Bold
                             )

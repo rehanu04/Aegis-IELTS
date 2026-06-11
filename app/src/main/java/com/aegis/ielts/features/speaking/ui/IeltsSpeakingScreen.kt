@@ -62,14 +62,18 @@ fun IeltsSpeakingAssessmentScreen(
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
                 if (utteranceId == "EXAMINER_UTTERANCE") {
-                    viewModel.onExaminerSpeakingCompleted()
+                    scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                        viewModel.onExaminerSpeakingCompleted()
+                    }
                 }
             }
             @Deprecated("Deprecated in Java")
             override fun onError(utteranceId: String?) {}
             override fun onError(utteranceId: String?, errorCode: Int) {
                 if (utteranceId == "EXAMINER_UTTERANCE") {
-                    viewModel.onExaminerSpeakingCompleted()
+                    scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                        viewModel.onExaminerSpeakingCompleted()
+                    }
                 }
             }
         })

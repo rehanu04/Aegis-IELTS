@@ -402,7 +402,7 @@ private fun ActiveWritingHeader(
                 disabledContainerColor = SurfaceSlateLight
             ),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            modifier = Modifier.wrapContentWidth().padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
             Text(
                 text = "Submit Essay",

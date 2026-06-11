@@ -14,11 +14,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import kotlin.random.Random
+import android.content.Context
+import android.speech.tts.TextToSpeech
+import dagger.hilt.android.qualifiers.ApplicationContext
 
 @HiltViewModel
 class ListeningViewModel @Inject constructor(
-    private val audioPlaybackEngine: AudioPlaybackEngine
+    private val audioPlaybackEngine: AudioPlaybackEngine,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
+
+    private var tts: TextToSpeech? = null
+
+    init {
+        tts = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                // initialized
+            }
+        }
+    }
 
     // ─── UI State ─────────────────────────────────────────────────────────────
     private val _uiState = MutableStateFlow<ListeningUiState>(ListeningUiState.Idle)
@@ -268,6 +282,8 @@ class ListeningViewModel @Inject constructor(
             } catch (e: Exception) {
                 // If asset is missing in emulator/build environment, gracefully simulate progress to keep app running
                 simulateAudioPlaybackProgress()
+                val fallbackText = "Please answer the following questions. " + section.questions.joinToString(" ") { it.questionText }
+                tts?.speak(fallbackText, TextToSpeech.QUEUE_FLUSH, null, "FALLBACK_TTS")
             }
         }
 
@@ -462,5 +478,7 @@ class ListeningViewModel @Inject constructor(
         audioPlaybackEngine.release()
         playbackStateJob?.cancel()
         progressTickerJob?.cancel()
+        tts?.stop()
+        tts?.shutdown()
     }
 }
