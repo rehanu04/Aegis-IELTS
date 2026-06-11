@@ -111,6 +111,12 @@ class AudioPlaybackEngine @Inject constructor(
      */
     suspend fun playFromAsset(assetPath: String) {
         val cleanPath = assetPath.replace("asset:///", "").replace("file:///android_asset/", "")
+        
+        // Verified AssetFileDescriptor check
+        withContext(Dispatchers.IO) {
+            context.assets.openFd(cleanPath).close()
+        }
+        
         playFromUri(Uri.parse("asset:///$cleanPath"))
     }
 

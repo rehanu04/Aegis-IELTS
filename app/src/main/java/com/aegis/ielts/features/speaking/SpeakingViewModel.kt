@@ -140,9 +140,9 @@ class SpeakingViewModel @Inject constructor(
         // Start capturing audio
         audioCaptureEngine.startCapture()
 
-        // For this mock pipeline, we'll record for exactly 10 seconds before simulating the user finishing.
+        // For this mock pipeline, we'll record for exactly 120 seconds before simulating the user finishing.
         // In a real scenario, this would be tied to silence detection or a manual "Stop" button.
-        delay(10_000L)
+        delay(120_000L)
 
         // Step 3: Stop capture and transition to ANALYZING
         val audioBytes = audioCaptureEngine.stopCapture()

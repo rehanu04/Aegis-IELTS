@@ -233,19 +233,19 @@ async def grade_writing(request: WritingGradeRequest):
 async def grade_speaking(request: SpeakingGradeRequest):
     logger.info("Received speaking grade request")
     words = request.transcript.split()
-    if not request.transcript or len(words) < 10:
-        logger.info("Empty or short transcript (under 10 words) detected. Returning zero band scores.")
+    if not request.transcript or len(words) < 5:
+        logger.info("Empty or short transcript (under 5 words) detected. Returning zero band scores.")
         return SpeakingAssessmentResponse(
             fluencyCoherence=FluencyCoherenceMetric(
                 score=0.0,
-                feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words.",
+                feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {len(words)} words.",
                 hesitationProfile=HesitationProfile(withinClausePauses=0, betweenClausePauses=0, totalSilenceMs=0),
                 fillerDensityIndex=0.0
             ),
-            lexicalResource=LexicalAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words.", lexicalAsymmetryIndex=0.0),
-            grammaticalRangeAccuracy=GrammarAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."),
-            pronunciation=PronunciationAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."),
-            overallFeedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."
+            lexicalResource=LexicalAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {len(words)} words.", lexicalAsymmetryIndex=0.0),
+            grammaticalRangeAccuracy=GrammarAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {len(words)} words."),
+            pronunciation=PronunciationAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {len(words)} words."),
+            overallFeedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {len(words)} words."
         )
 
     system_instruction = """
@@ -390,18 +390,18 @@ def local_speaking_assessment(transcript: str) -> SpeakingAssessmentResponse:
     logger.info("Running local mock speaking evaluation fallback")
     words = transcript.strip().split()
     word_count = len(words)
-    if word_count < 10:
+    if word_count < 5:
         return SpeakingAssessmentResponse(
             fluencyCoherence=FluencyCoherenceMetric(
                 score=0.0,
-                feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words.",
+                feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {word_count} words.",
                 hesitationProfile=HesitationProfile(withinClausePauses=0, betweenClausePauses=0, totalSilenceMs=0),
                 fillerDensityIndex=0.0
             ),
-            lexicalResource=LexicalAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words.", lexicalAsymmetryIndex=0.0),
-            grammaticalRangeAccuracy=GrammarAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."),
-            pronunciation=PronunciationAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."),
-            overallFeedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."
+            lexicalResource=LexicalAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {word_count} words.", lexicalAsymmetryIndex=0.0),
+            grammaticalRangeAccuracy=GrammarAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {word_count} words."),
+            pronunciation=PronunciationAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {word_count} words."),
+            overallFeedback=f"Band 0.0: Non-attempt / Under 5 rateable words. The response contains only {word_count} words."
         )
 
     # Detect hesitation pauses and fillers
