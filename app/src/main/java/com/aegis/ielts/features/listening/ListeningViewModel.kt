@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import javax.inject.Inject
 import kotlin.random.Random
 import android.content.Context
@@ -320,14 +321,16 @@ class ListeningViewModel @Inject constructor(
                         updateActiveAudioPlayingState(true)
                         startProgressIndicatorTicker()
                     }
-                    is PlaybackState.Completed, is PlaybackState.Error -> {
-                        val wasPlaying = (_uiState.value as? ListeningUiState.Active)?.isAudioPlaying == true
+                    is PlaybackState.Completed -> {
                         updateActiveAudioPlayingState(false)
                         progressTickerJob?.cancel()
                         _audioPlaybackProgress.value = 1f
-                        if (state is PlaybackState.Completed || wasPlaying) {
-                            advanceToNextSection()
-                        }
+                        advanceToNextSection()
+                    }
+                    is PlaybackState.Error -> {
+                        updateActiveAudioPlayingState(false)
+                        progressTickerJob?.cancel()
+                        simulateAudioPlaybackProgress()
                     }
                     else -> {}
                 }
@@ -347,20 +350,21 @@ class ListeningViewModel @Inject constructor(
                 } else {
                     _audioPlaybackProgress.value = 0f
                 }
-                kotlinx.coroutines.delay(200)
+                delay(200)
             }
         }
     }
 
-    private suspend fun simulateAudioPlaybackProgress() {
+    private fun simulateAudioPlaybackProgress() {
         updateActiveAudioPlayingState(true)
         progressTickerJob?.cancel()
         progressTickerJob = viewModelScope.launch {
+            val totalSeconds = 300f // 5 minutes standard official section length
             var elapsed = 0f
-            while (elapsed < 30f) {
-                kotlinx.coroutines.delay(200)
-                elapsed += 0.2f
-                _audioPlaybackProgress.value = (elapsed / 30f).coerceIn(0f, 1f)
+            while (elapsed < totalSeconds) {
+                delay(1000)
+                elapsed += 1.0f
+                _audioPlaybackProgress.value = (elapsed / totalSeconds).coerceIn(0f, 1f)
             }
             _audioPlaybackProgress.value = 1f
             updateActiveAudioPlayingState(false)

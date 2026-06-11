@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.lazy.LazyColumn
 import com.aegis.ielts.features.listening.ListeningUiState
 import com.aegis.ielts.features.listening.ListeningViewModel
 import com.aegis.ielts.features.listening.data.*
@@ -425,21 +426,28 @@ private fun ListeningActiveContent(
             val isCompact = maxWidth < 768.dp
 
             if (isCompact) {
-                Column(
+                LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(20.dp)
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    SectionOverviewPanel(section = section)
-                    Spacer(modifier = Modifier.height(20.dp))
-                    QuestionsFormPanel(
-                        questions = section.questions,
-                        answers = answers,
-                        inputErrors = inputErrors,
-                        isFrozen = state.isFrozen,
-                        onSaveAnswer = onSaveAnswer
-                    )
+                    item {
+                        SectionOverviewPanel(section = section)
+                    }
+                    items(section.questions.size) { index ->
+                        val question = section.questions[index]
+                        val answer = answers[question.id].orEmpty()
+                        val error = inputErrors[question.id]
+                        QuestionCard(
+                            index = index,
+                            question = question,
+                            answer = answer,
+                            error = error,
+                            isFrozen = state.isFrozen,
+                            onSaveAnswer = onSaveAnswer
+                        )
+                    }
                 }
             } else {
                 Row(modifier = Modifier.fillMaxSize()) {
@@ -457,21 +465,27 @@ private fun ListeningActiveContent(
                     VerticalDivider(color = SurfaceSlateLight, thickness = 1.dp)
 
                     // Right Column: Interactive nodes
-                    Box(
+                    LazyColumn(
                         modifier = Modifier
                             .weight(1.1f)
                             .fillMaxHeight()
                             .background(SurfaceSlateLight)
-                            .padding(20.dp)
-                            .verticalScroll(rememberScrollState())
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        QuestionsFormPanel(
-                            questions = section.questions,
-                            answers = answers,
-                            inputErrors = inputErrors,
-                            isFrozen = state.isFrozen,
-                            onSaveAnswer = onSaveAnswer
-                        )
+                        items(section.questions.size) { index ->
+                            val question = section.questions[index]
+                            val answer = answers[question.id].orEmpty()
+                            val error = inputErrors[question.id]
+                            QuestionCard(
+                                index = index,
+                                question = question,
+                                answer = answer,
+                                error = error,
+                                isFrozen = state.isFrozen,
+                                onSaveAnswer = onSaveAnswer
+                            )
+                        }
                     }
                 }
             }
@@ -561,92 +575,74 @@ private fun SectionOverviewPanel(section: ListeningSection) {
 }
 
 @Composable
-private fun QuestionsFormPanel(
-    questions: List<ListeningQuestion>,
-    answers: Map<String, String>,
-    inputErrors: Map<String, String?>,
+private fun QuestionCard(
+    index: Int,
+    question: ListeningQuestion,
+    answer: String,
+    error: String?,
     isFrozen: Boolean,
     onSaveAnswer: (String, String) -> Unit
 ) {
-    Column {
-        Text(
-            text = "SECTION QUESTIONS",
-            color = SurfaceCyan,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.labelMedium,
-            letterSpacing = 1.5.sp
-        )
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceCard),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = question.instruction,
+                color = AccentGold,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.5.sp
+            )
 
-        Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-        questions.forEachIndexed { index, question ->
-            val answer = answers[question.id].orEmpty()
-            val error = inputErrors[question.id]
+            Text(
+                text = "Question ${index + 1}: ${question.questionText}",
+                color = TextLight,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 20.sp
+            )
 
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SurfaceCard),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = question.instruction,
-                        color = AccentGold,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.5.sp
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Route to matching sub-widgets based on question types
+            when (question) {
+                is ListeningQuestion.FormCompletion -> {
+                    FormCompletionWidget(
+                        value = answer,
+                        error = error,
+                        isFrozen = isFrozen,
+                        onValueChange = { onSaveAnswer(question.id, it) }
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "Question ${index + 1}: ${question.questionText}",
-                        color = TextLight,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        lineHeight = 20.sp
+                }
+                is ListeningQuestion.MultipleChoice -> {
+                    MultipleChoiceWidget(
+                        selectedOption = answer,
+                        options = question.options,
+                        isFrozen = isFrozen,
+                        onSelect = { onSaveAnswer(question.id, it) }
                     )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Route to matching sub-widgets based on question types
-                    when (question) {
-                        is ListeningQuestion.FormCompletion -> {
-                            FormCompletionWidget(
-                                value = answer,
-                                error = error,
-                                isFrozen = isFrozen,
-                                onValueChange = { onSaveAnswer(question.id, it) }
-                            )
-                        }
-                        is ListeningQuestion.MultipleChoice -> {
-                            MultipleChoiceWidget(
-                                selectedOption = answer,
-                                options = question.options,
-                                isFrozen = isFrozen,
-                                onSelect = { onSaveAnswer(question.id, it) }
-                            )
-                        }
-                        is ListeningQuestion.MapLabeling -> {
-                            MapLabelingWidget(
-                                selectedCoordinate = answer,
-                                coordinates = question.mapLocations,
-                                isFrozen = isFrozen,
-                                onSelect = { onSaveAnswer(question.id, it) }
-                            )
-                        }
-                        is ListeningQuestion.Matching -> {
-                            MatchingWidget(
-                                questionText = question.questionText,
-                                selectedCategory = answer,
-                                categories = question.categories,
-                                isFrozen = isFrozen,
-                                onSelect = { onSaveAnswer(question.id, it) }
-                            )
-                        }
-                    }
+                }
+                is ListeningQuestion.MapLabeling -> {
+                    MapLabelingWidget(
+                        selectedCoordinate = answer,
+                        coordinates = question.mapLocations,
+                        isFrozen = isFrozen,
+                        onSelect = { onSaveAnswer(question.id, it) }
+                    )
+                }
+                is ListeningQuestion.Matching -> {
+                    MatchingWidget(
+                        questionText = question.questionText,
+                        selectedCategory = answer,
+                        categories = question.categories,
+                        isFrozen = isFrozen,
+                        onSelect = { onSaveAnswer(question.id, it) }
+                    )
                 }
             }
         }

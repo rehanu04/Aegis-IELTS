@@ -228,9 +228,9 @@ fun IeltsSpeakingAssessmentScreen(
                         )
 
                         val partText = when (state.currentPart) {
-                            1 -> "PART 1 - Question ${state.currentQuestionIndex + 1} of 3"
-                            2 -> "PART 2 - Cue Card Topic"
-                            3 -> "PART 3 - Question ${state.currentQuestionIndex - 3} of 3"
+                            1 -> "PART 1: INTRODUCTION"
+                            2 -> "PART 2: CUE CARD"
+                            3 -> "PART 3: DISCUSSION"
                             else -> "PART ${state.currentPart}"
                         }
                         Text(
