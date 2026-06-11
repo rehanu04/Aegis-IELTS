@@ -24,7 +24,9 @@ sealed class SpeakingUiState {
      */
     data class MockTestActive(
         val engineState: ExaminerEngineState,
-        val promptText: String = "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
+        val promptText: String = "Welcome to the IELTS speaking test. Can you tell me your full name, please?",
+        val currentPart: Int = 1,
+        val currentQuestionIndex: Int = 0
     ) : SpeakingUiState()
 
     /**

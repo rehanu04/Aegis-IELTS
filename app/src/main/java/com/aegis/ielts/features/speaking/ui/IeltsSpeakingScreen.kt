@@ -227,6 +227,21 @@ fun IeltsSpeakingAssessmentScreen(
                             modifier = Modifier.padding(top = 16.dp)
                         )
 
+                        val partText = when (state.currentPart) {
+                            1 -> "PART 1 - Question ${state.currentQuestionIndex + 1} of 3"
+                            2 -> "PART 2 - Cue Card Topic"
+                            3 -> "PART 3 - Question ${state.currentQuestionIndex - 3} of 3"
+                            else -> "PART ${state.currentPart}"
+                        }
+                        Text(
+                            text = partText,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = surfaceCyan,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.sp,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+
                         Spacer(Modifier.weight(0.5f))
 
                         // Interactive Orb Driver mapping to high-precision telemetry states

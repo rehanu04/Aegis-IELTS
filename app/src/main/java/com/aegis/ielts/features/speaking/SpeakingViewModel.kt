@@ -40,6 +40,33 @@ class SpeakingViewModel @Inject constructor(
     private var lastEvaluationResponse: SpeakingAssessmentResponse? = null
     private var isFinalFeedback = false
 
+    private val part1Questions = listOf(
+        "Welcome to the IELTS speaking test. Can you tell me your full name, please?",
+        "Where are you from, and do you work or study?",
+        "Let's talk about your free time. What hobbies do you enjoy the most?"
+    )
+    private val part2Question = "Describe a book or a movie that had a strong influence on you. You should say what it is, when you saw/read it, and explain why it influenced you."
+    private val part3Questions = listOf(
+        "In your opinion, how has the type of movies people watch changed over the past few decades?",
+        "Do you think films should always have educational value, or is entertainment enough?",
+        "Why do you think some local films fail to attract a global audience compared to big budget productions?"
+    )
+    private val allQuestions = part1Questions + part2Question + part3Questions
+
+    private val dummyTranscripts = listOf(
+        "My name is John Doe. I am taking the IELTS test to study abroad.",
+        "I am from a small town in the countryside, and currently I am working as a junior software engineer.",
+        "In my free time, I really enjoy reading books and playing tennis with my friends.",
+        "I would like to describe the movie Inception. It had a strong influence on me because of its unique concept of dreams within dreams and how it explores sub-consciousness. I saw it a few years ago, and it really changed the way I think about storytelling.",
+        "In my opinion, movies have become much more visual-effects-driven now compared to the past when character development and storyline were more important.",
+        "I think films should primarily entertain, but having some educational or thought-provoking value makes them much more memorable and impactful.",
+        "Local films often have very limited budgets and tackle cultural themes that might not translate well to global audiences compared to big Hollywood blockbusters."
+    )
+
+    private val accumulatedTranscripts = mutableListOf<String>()
+    private val accumulatedPrompts = mutableListOf<String>()
+    private var currentQuestionIdx = 0
+
     // ─── UI State ─────────────────────────────────────────────────────────────
 
     private val _uiState = MutableStateFlow<SpeakingUiState>(SpeakingUiState.Idle)
@@ -91,9 +118,14 @@ class SpeakingViewModel @Inject constructor(
         
         lastEvaluationResponse = null
         isFinalFeedback = false
+        currentQuestionIdx = 0
+        accumulatedTranscripts.clear()
+        accumulatedPrompts.clear()
         
         _uiState.value = SpeakingUiState.MockTestActive(
-            engineState = ExaminerEngineState.CONNECTING
+            engineState = ExaminerEngineState.CONNECTING,
+            currentPart = 1,
+            currentQuestionIndex = 0
         )
         
         stateMachineJob?.cancel()
@@ -112,10 +144,12 @@ class SpeakingViewModel @Inject constructor(
                 return@launch
             }
 
-            val promptText = "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
+            val promptText = allQuestions[currentQuestionIdx]
             _uiState.value = SpeakingUiState.MockTestActive(
                 engineState = ExaminerEngineState.EXAMINER_SPEAKING,
-                promptText = promptText
+                promptText = promptText,
+                currentPart = 1,
+                currentQuestionIndex = currentQuestionIdx
             )
             
             // Play asset as fallback or audio indicator
@@ -143,8 +177,15 @@ class SpeakingViewModel @Inject constructor(
     }
 
     private suspend fun transitionToRecording(prompts: List<String>) {
+        val currentState = _uiState.value as? SpeakingUiState.MockTestActive ?: return
+        val activePart = currentState.currentPart
+        val activeQuestionIdx = currentState.currentQuestionIndex
+
         _uiState.value = SpeakingUiState.MockTestActive(
-            engineState = ExaminerEngineState.CANDIDATE_RECORDING
+            engineState = ExaminerEngineState.CANDIDATE_RECORDING,
+            promptText = currentState.promptText,
+            currentPart = activePart,
+            currentQuestionIndex = activeQuestionIdx
         )
         
         // Start the elapsed time ticker
@@ -178,38 +219,79 @@ class SpeakingViewModel @Inject constructor(
         }
         vadJob.cancel()
 
-        // Step 3: Stop capture and transition to ANALYZING
+        // Step 3: Stop capture
         val audioBytes = audioCaptureEngine.stopCapture()
         val telemetry = audioCaptureEngine.silenceTelemetry
         stopTimer()
 
-        _uiState.value = SpeakingUiState.MockTestActive(
-            engineState = ExaminerEngineState.ANALYZING
-        )
+        // Accumulate prompt and transcript
+        val currentPrompt = allQuestions[currentQuestionIdx]
+        val currentTranscript = if (currentQuestionIdx < dummyTranscripts.size) {
+            dummyTranscripts[currentQuestionIdx]
+        } else {
+            "Response to question $currentQuestionIdx"
+        }
+        accumulatedPrompts.add(currentPrompt)
+        accumulatedTranscripts.add(currentTranscript)
 
-        // Simulate Speech-to-Text transcript
-        val dummyTranscript = "My name is John Doe. I am taking the IELTS test to study abroad."
-
-        // Step 4: Evaluate via Gemini
-        val result = geminiRepository.evaluateSpeaking(
-            audioBytes = audioBytes,
-            transcript = dummyTranscript,
-            prompts = prompts
-        )
-
-        result.onSuccess { response ->
-            // Inject captured telemetry into the response
-            val finalResponse = response.copy(silenceTelemetry = telemetry)
-            lastEvaluationResponse = finalResponse
-            isFinalFeedback = true
+        if (currentQuestionIdx < 6) {
+            // Move to next question!
+            currentQuestionIdx++
+            val nextPart = if (currentQuestionIdx in 0..2) 1 else if (currentQuestionIdx == 3) 2 else 3
+            val nextPrompt = allQuestions[currentQuestionIdx]
             
-            // Transition back to EXAMINER_SPEAKING to speak feedback
             _uiState.value = SpeakingUiState.MockTestActive(
                 engineState = ExaminerEngineState.EXAMINER_SPEAKING,
-                promptText = finalResponse.overallFeedback
+                promptText = nextPrompt,
+                currentPart = nextPart,
+                currentQuestionIndex = currentQuestionIdx
             )
-        }.onFailure { error ->
-            _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to evaluate speaking performance.")
+            
+            // Optionally play an audio cue or intro when transitioning parts
+            if (currentQuestionIdx == 3) {
+                try {
+                    audioPlaybackEngine.playFromAsset("audio/part2_intro.mp3")
+                } catch (e: Exception) {}
+            } else if (currentQuestionIdx == 4) {
+                try {
+                    audioPlaybackEngine.playFromAsset("audio/part3_intro.mp3")
+                } catch (e: Exception) {}
+            }
+        } else {
+            // End of Part 3. Evaluate the entire combined transcripts and prompts!
+            _uiState.value = SpeakingUiState.MockTestActive(
+                engineState = ExaminerEngineState.ANALYZING,
+                promptText = "Evaluating Speaking Performance...",
+                currentPart = 3,
+                currentQuestionIndex = currentQuestionIdx
+            )
+
+            val combinedTranscript = accumulatedTranscripts.joinToString("\n")
+            val combinedPrompts = accumulatedPrompts.toList()
+
+            // Step 4: Evaluate via Gemini
+            val result = geminiRepository.evaluateSpeaking(
+                audioBytes = audioBytes,
+                transcript = combinedTranscript,
+                prompts = combinedPrompts
+            )
+
+            result.onSuccess { response ->
+                // Inject captured telemetry into the response
+                val finalResponse = response.copy(silenceTelemetry = telemetry)
+                lastEvaluationResponse = finalResponse
+                isFinalFeedback = true
+                
+                // Transition back to EXAMINER_SPEAKING to speak feedback
+                _uiState.value = SpeakingUiState.MockTestActive(
+                    engineState = ExaminerEngineState.EXAMINER_SPEAKING,
+                    promptText = finalResponse.overallFeedback,
+                    currentPart = 3,
+                    currentQuestionIndex = currentQuestionIdx
+                )
+            }.onFailure { error ->
+                _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to evaluate speaking performance.")
+            }
         }
     }
 

@@ -292,9 +292,20 @@ class ListeningViewModel @Inject constructor(
                         environmentDescription = section.environment.description,
                         accentLabel = section.accent.label
                     )
-                    val cacheFile = File(context.cacheDir, "listening_temp_sec_${section.sectionNumber}.mp3")
-                    cacheFile.writeBytes(audioBytes)
-                    audioPlaybackEngine.playFromUri(Uri.fromFile(cacheFile))
+                    val responseStr = String(audioBytes, Charsets.UTF_8)
+                    if (responseStr.trim().startsWith("{") && responseStr.contains("fallback_to_local")) {
+                        val fallbackPath = try {
+                            val jsonObject = org.json.JSONObject(responseStr)
+                            jsonObject.optString("local_asset_path", section.audioAssetPath)
+                        } catch (e: Exception) {
+                            section.audioAssetPath
+                        }
+                        audioPlaybackEngine.playFromAsset(fallbackPath)
+                    } else {
+                        val cacheFile = File(context.cacheDir, "listening_temp_sec_${section.sectionNumber}.mp3")
+                        cacheFile.writeBytes(audioBytes)
+                        audioPlaybackEngine.playFromUri(Uri.fromFile(cacheFile))
+                    }
                 } catch (ex: Exception) {
                     simulateAudioPlaybackProgress()
                 }

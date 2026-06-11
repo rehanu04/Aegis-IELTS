@@ -327,30 +327,21 @@ class ListeningAudioRequest(BaseModel):
     accent_label: str = Field(..., description="Accent label")
 
 
-def generate_mock_wav(duration: float = 30.0) -> bytes:
-    sample_rate = 16000
-    num_samples = int(sample_rate * duration)
-    
-    buffer = io.BytesIO()
-    with wave.open(buffer, 'wb') as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        
-        for i in range(num_samples):
-            # Generate a 300 Hz hum with a 1 Hz pulse
-            pulse = 0.5 + 0.5 * math.sin(2.0 * math.pi * 1.0 * i / sample_rate)
-            value = int(15000.0 * pulse * math.sin(2.0 * math.pi * 300.0 * i / sample_rate))
-            data = struct.pack('<h', value)
-            wav_file.writeframesraw(data)
-            
-    return buffer.getvalue()
-
-
 @app.post("/api/v1/generate-listening-audio")
 async def generate_listening_audio(request: ListeningAudioRequest):
     logger.info(f"Generating listening audio for Section {request.section_number} ({request.accent_label})")
     
+    if not client or not os.getenv("GEMINI_API_KEY"):
+        logger.info("GEMINI_API_KEY missing. Returning fallback asset payload.")
+        fallback_file = f"audio/listening_sec{request.section_number}.mp3"
+        return JSONResponse(
+            status_code=200,
+            content={
+                "fallback_to_local": True,
+                "local_asset_path": fallback_file
+            }
+        )
+
     system_instruction = f"""
     You are an IELTS Listening examiner.
     Generate a continuous, realistic IELTS Listening monologue or dialogue script for Section {request.section_number} ({request.environment_label}: {request.environment_description}).
@@ -361,38 +352,43 @@ async def generate_listening_audio(request: ListeningAudioRequest):
     
     user_prompt = f"Please read the continuous {request.accent_label} narrative for Section {request.section_number}."
     
-    if client:
-        try:
-            # We use gemini-2.5-flash which supports response_modalities=["AUDIO"]
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.7,
-                    response_modalities=["AUDIO"]
-                )
+    try:
+        # We use gemini-2.5-flash which supports response_modalities=["AUDIO"]
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.7,
+                response_modalities=["AUDIO"]
             )
-            
-            audio_bytes = None
-            if response.candidates and response.candidates[0].content.parts:
-                for part in response.candidates[0].content.parts:
-                    if part.inline_data:
-                        audio_bytes = part.inline_data.data
-                        break
-            
-            if audio_bytes:
-                logger.info("Successfully generated listening audio via Gemini API")
-                return Response(content=audio_bytes, media_type="audio/mp3")
-            else:
-                logger.warning("Gemini API did not return audio inline_data. Falling back to local synthesis.")
-        except Exception as e:
-            logger.error(f"Error generating audio via Gemini: {e}. Falling back to local synthesis.")
+        )
+        
+        audio_bytes = None
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.inline_data:
+                    audio_bytes = part.inline_data.data
+                    break
+        
+        if audio_bytes:
+            logger.info("Successfully generated listening audio via Gemini API")
+            return Response(content=audio_bytes, media_type="audio/mp3")
+        else:
+            logger.warning("Gemini API did not return audio inline_data. Falling back to local synthesis.")
+    except Exception as e:
+        logger.error(f"Error generating audio via Gemini: {e}. Falling back to local synthesis.")
             
     # Local fallback
-    logger.info("Generating mock audio via local fallback")
-    mock_audio = generate_mock_wav(duration=30.0)
-    return Response(content=mock_audio, media_type="audio/wav")
+    logger.info("Generating fallback local asset payload due to generation failure")
+    fallback_file = f"audio/listening_sec{request.section_number}.mp3"
+    return JSONResponse(
+        status_code=200,
+        content={
+            "fallback_to_local": True,
+            "local_asset_path": fallback_file
+        }
+    )
 
 
 # ─── Mock Fallback Engines ────────────────────────────────────────────────────

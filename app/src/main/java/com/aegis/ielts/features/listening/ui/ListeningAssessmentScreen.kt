@@ -23,6 +23,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
 import com.aegis.ielts.features.listening.ListeningUiState
 import com.aegis.ielts.features.listening.ListeningViewModel
 import com.aegis.ielts.features.listening.data.*
@@ -777,32 +779,52 @@ private fun MapLabelingWidget(
                 .border(1.dp, SurfaceSlateLight, RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val h = size.height
+            val context = LocalContext.current
+            val mapPainter = remember {
+                try {
+                    val stream = context.assets.open("maps/reserve_tour.png")
+                    val bitmap = android.graphics.BitmapFactory.decodeStream(stream)
+                    androidx.compose.ui.graphics.painter.BitmapPainter(bitmap.asImageBitmap())
+                } catch (e: Exception) {
+                    null
+                }
+            }
 
-                // Draw layout grids
-                drawRect(color = SurfaceSlateLight.copy(alpha = 0.5f), size = size, style = Stroke(width = 2.dp.toPx()))
+            if (mapPainter != null) {
+                Image(
+                    painter = mapPainter,
+                    contentDescription = "Reserve Tour Map",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
 
-                // Draw rooms
-                drawRect(
-                    color = SurfaceSlateLight,
-                    topLeft = androidx.compose.ui.geometry.Offset(10.dp.toPx(), 10.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.4f),
-                    style = Stroke(width = 1.dp.toPx())
-                )
-                drawRect(
-                    color = SurfaceSlateLight,
-                    topLeft = androidx.compose.ui.geometry.Offset(w * 0.65f, 10.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.4f),
-                    style = Stroke(width = 1.dp.toPx())
-                )
-                drawRect(
-                    color = SurfaceSlateLight,
-                    topLeft = androidx.compose.ui.geometry.Offset(w * 0.35f, h * 0.55f),
-                    size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.35f),
-                    style = Stroke(width = 1.dp.toPx())
-                )
+                    // Draw layout grids
+                    drawRect(color = SurfaceSlateLight.copy(alpha = 0.5f), size = size, style = Stroke(width = 2.dp.toPx()))
+
+                    // Draw rooms
+                    drawRect(
+                        color = SurfaceSlateLight,
+                        topLeft = androidx.compose.ui.geometry.Offset(10.dp.toPx(), 10.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.4f),
+                        style = Stroke(width = 1.dp.toPx())
+                    )
+                    drawRect(
+                        color = SurfaceSlateLight,
+                        topLeft = androidx.compose.ui.geometry.Offset(w * 0.65f, 10.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.4f),
+                        style = Stroke(width = 1.dp.toPx())
+                    )
+                    drawRect(
+                        color = SurfaceSlateLight,
+                        topLeft = androidx.compose.ui.geometry.Offset(w * 0.35f, h * 0.55f),
+                        size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.35f),
+                        style = Stroke(width = 1.dp.toPx())
+                    )
+                }
             }
 
             // Coordinates Labels overlay
