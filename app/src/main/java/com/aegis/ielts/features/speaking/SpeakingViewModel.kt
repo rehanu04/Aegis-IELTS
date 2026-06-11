@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.aegis.ielts.core.audio.AudioCaptureEngine
 import com.aegis.ielts.core.audio.AudioPlaybackEngine
 import com.aegis.ielts.core.audio.PlaybackState
+import com.aegis.ielts.core.domain.SpeakingAssessmentResponse
 import com.aegis.ielts.core.network.GeminiRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -35,6 +36,9 @@ class SpeakingViewModel @Inject constructor(
     private val audioPlaybackEngine : AudioPlaybackEngine,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context
 ) : ViewModel() {
+
+    private var lastEvaluationResponse: SpeakingAssessmentResponse? = null
+    private var isFinalFeedback = false
 
     // ─── UI State ─────────────────────────────────────────────────────────────
 
@@ -85,6 +89,9 @@ class SpeakingViewModel @Inject constructor(
     fun startMockExamPipeline(testId: String) {
         if (_uiState.value is SpeakingUiState.MockTestActive) return
         
+        lastEvaluationResponse = null
+        isFinalFeedback = false
+        
         _uiState.value = SpeakingUiState.MockTestActive(
             engineState = ExaminerEngineState.CONNECTING
         )
@@ -123,8 +130,14 @@ class SpeakingViewModel @Inject constructor(
     fun onExaminerSpeakingCompleted() {
         val currentState = _uiState.value as? SpeakingUiState.MockTestActive ?: return
         if (currentState.engineState == ExaminerEngineState.EXAMINER_SPEAKING) {
-            viewModelScope.launch {
-                transitionToRecording(listOf(currentState.promptText))
+            if (isFinalFeedback) {
+                // Assessment is complete, transition to the scorecard!
+                val response = lastEvaluationResponse ?: return
+                _uiState.value = SpeakingUiState.EvaluationComplete(response)
+            } else {
+                viewModelScope.launch {
+                    transitionToRecording(listOf(currentState.promptText))
+                }
             }
         }
     }
@@ -140,9 +153,30 @@ class SpeakingViewModel @Inject constructor(
         // Start capturing audio
         audioCaptureEngine.startCapture()
 
-        // For this mock pipeline, we'll record for exactly 120 seconds before simulating the user finishing.
-        // In a real scenario, this would be tied to silence detection or a manual "Stop" button.
-        delay(120_000L)
+        // VAD 3.5s silence monitor loop
+        var lastVoiceActivityTime = System.currentTimeMillis()
+        var silenceTriggered = false
+        val vadJob = viewModelScope.launch {
+            audioCaptureEngine.audioFrames.collect { frame ->
+                val rawDb = frame.amplitudeDb * 96f - 96f
+                if (rawDb >= -40f) {
+                    lastVoiceActivityTime = System.currentTimeMillis()
+                } else {
+                    val silenceDurationMs = System.currentTimeMillis() - lastVoiceActivityTime
+                    if (silenceDurationMs >= 3500L) { // 3.5 seconds
+                        silenceTriggered = true
+                    }
+                }
+            }
+        }
+
+        // Wait for max 120 seconds or until silence detection triggers
+        val maxDurationMs = 120_000L
+        val startTime = System.currentTimeMillis()
+        while (System.currentTimeMillis() - startTime < maxDurationMs && !silenceTriggered) {
+            delay(100)
+        }
+        vadJob.cancel()
 
         // Step 3: Stop capture and transition to ANALYZING
         val audioBytes = audioCaptureEngine.stopCapture()
@@ -166,7 +200,14 @@ class SpeakingViewModel @Inject constructor(
         result.onSuccess { response ->
             // Inject captured telemetry into the response
             val finalResponse = response.copy(silenceTelemetry = telemetry)
-            _uiState.value = SpeakingUiState.EvaluationComplete(finalResponse)
+            lastEvaluationResponse = finalResponse
+            isFinalFeedback = true
+            
+            // Transition back to EXAMINER_SPEAKING to speak feedback
+            _uiState.value = SpeakingUiState.MockTestActive(
+                engineState = ExaminerEngineState.EXAMINER_SPEAKING,
+                promptText = finalResponse.overallFeedback
+            )
         }.onFailure { error ->
             _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to evaluate speaking performance.")
         }

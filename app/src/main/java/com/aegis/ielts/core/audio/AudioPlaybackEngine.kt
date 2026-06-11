@@ -127,8 +127,15 @@ class AudioPlaybackEngine @Inject constructor(
         _isPlaying.value = false
     }
 
+    /** Exposes the exact position of the active audio stream. */
+    fun getCurrentPosition(): Long = player?.currentPosition ?: 0L
+
+    /** Exposes the exact duration of the active audio stream. */
+    fun getDuration(): Long = player?.duration ?: 0L
+
     /**
      * Releases the ExoPlayer instance.
+
      * Called from [SpeakingViewModel.onCleared] — safe to call on any thread.
      */
     fun release() {

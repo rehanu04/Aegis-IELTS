@@ -17,10 +17,14 @@ import kotlin.random.Random
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import android.net.Uri
+import com.aegis.ielts.core.network.GeminiRepository
 
 @HiltViewModel
 class ListeningViewModel @Inject constructor(
     private val audioPlaybackEngine: AudioPlaybackEngine,
+    private val geminiRepository: GeminiRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -280,10 +284,20 @@ class ListeningViewModel @Inject constructor(
             try {
                 audioPlaybackEngine.playFromAsset(section.audioAssetPath)
             } catch (e: Exception) {
-                // If asset is missing in emulator/build environment, gracefully simulate progress to keep app running
-                simulateAudioPlaybackProgress()
-                val fallbackText = "Please answer the following questions. " + section.questions.joinToString(" ") { it.questionText }
-                tts?.speak(fallbackText, TextToSpeech.QUEUE_FLUSH, null, "FALLBACK_TTS")
+                // If asset is missing in emulator/build environment, fetch from backend
+                try {
+                    val audioBytes = geminiRepository.fetchListeningAudio(
+                        sectionNumber = section.sectionNumber,
+                        environmentLabel = section.environment.label,
+                        environmentDescription = section.environment.description,
+                        accentLabel = section.accent.label
+                    )
+                    val cacheFile = File(context.cacheDir, "listening_temp_sec_${section.sectionNumber}.mp3")
+                    cacheFile.writeBytes(audioBytes)
+                    audioPlaybackEngine.playFromUri(Uri.fromFile(cacheFile))
+                } catch (ex: Exception) {
+                    simulateAudioPlaybackProgress()
+                }
             }
         }
 
@@ -296,9 +310,13 @@ class ListeningViewModel @Inject constructor(
                         startProgressIndicatorTicker()
                     }
                     is PlaybackState.Completed, is PlaybackState.Error -> {
+                        val wasPlaying = (_uiState.value as? ListeningUiState.Active)?.isAudioPlaying == true
                         updateActiveAudioPlayingState(false)
                         progressTickerJob?.cancel()
                         _audioPlaybackProgress.value = 1f
+                        if (state is PlaybackState.Completed || wasPlaying) {
+                            advanceToNextSection()
+                        }
                     }
                     else -> {}
                 }
@@ -308,9 +326,25 @@ class ListeningViewModel @Inject constructor(
 
     private fun startProgressIndicatorTicker() {
         progressTickerJob?.cancel()
+        progressTickerJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            while (true) {
+                val duration = audioPlaybackEngine.getDuration()
+                val position = audioPlaybackEngine.getCurrentPosition()
+                if (duration > 0) {
+                    val progress = position.toFloat() / duration.toFloat()
+                    _audioPlaybackProgress.value = progress.coerceIn(0f, 1f)
+                } else {
+                    _audioPlaybackProgress.value = 0f
+                }
+                kotlinx.coroutines.delay(200)
+            }
+        }
+    }
+
+    private suspend fun simulateAudioPlaybackProgress() {
+        updateActiveAudioPlayingState(true)
+        progressTickerJob?.cancel()
         progressTickerJob = viewModelScope.launch {
-            // Simulate progression ticks from 0f to 1f over a 30-second duration for demo testing
-            // In production, this binds directly to ExoPlayer currentPosition / duration
             var elapsed = 0f
             while (elapsed < 30f) {
                 kotlinx.coroutines.delay(200)
@@ -319,12 +353,8 @@ class ListeningViewModel @Inject constructor(
             }
             _audioPlaybackProgress.value = 1f
             updateActiveAudioPlayingState(false)
+            advanceToNextSection()
         }
-    }
-
-    private suspend fun simulateAudioPlaybackProgress() {
-        updateActiveAudioPlayingState(true)
-        startProgressIndicatorTicker()
     }
 
     private fun updateActiveAudioPlayingState(isPlaying: Boolean) {

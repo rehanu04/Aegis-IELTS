@@ -429,7 +429,7 @@ private fun ListeningActiveContent(
                         .verticalScroll(rememberScrollState())
                         .padding(20.dp)
                 ) {
-                    ListeningPromptPanel(section = section)
+                    SectionOverviewPanel(section = section)
                     Spacer(modifier = Modifier.height(20.dp))
                     QuestionsFormPanel(
                         questions = section.questions,
@@ -449,7 +449,7 @@ private fun ListeningActiveContent(
                             .padding(20.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
-                        ListeningPromptPanel(section = section)
+                        SectionOverviewPanel(section = section)
                     }
 
                     VerticalDivider(color = SurfaceSlateLight, thickness = 1.dp)
@@ -508,11 +508,11 @@ private fun CanvasIsolatedProgressBar(
 }
 
 @Composable
-private fun ListeningPromptPanel(section: ListeningSection) {
+private fun SectionOverviewPanel(section: ListeningSection) {
     Column {
         Text(
-            text = section.environment.label.uppercase(),
-            color = AccentGreen,
+            text = "SECTION OVERVIEW",
+            color = SurfaceCyan,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.labelMedium,
             letterSpacing = 1.5.sp
@@ -520,44 +520,38 @@ private fun ListeningPromptPanel(section: ListeningSection) {
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        Text(
-            text = "Media Context Summary",
-            color = TextLight,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Text(
-            text = section.environment.description,
-            color = TextLight.copy(alpha = 0.9f),
-            style = MaterialTheme.typography.bodyMedium,
-            lineHeight = 22.sp
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
         Card(
             colors = CardDefaults.cardColors(containerColor = SurfaceSlateLight),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = null,
-                    tint = SurfaceCyan,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "Ensure your headphones are adjusted. Audio will play once only. Match your answers in real time.",
-                    color = TextMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    lineHeight = 16.sp
+                    text = "Section: ${section.sectionNumber}",
+                    color = TextLight,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Environment: ${section.environment.label}",
+                    color = AccentGreen,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Speaker Accent: ${section.accent.label}",
+                    color = AccentGold,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = section.environment.description,
+                    color = TextLight.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    lineHeight = 22.sp
                 )
             }
         }
@@ -643,6 +637,7 @@ private fun QuestionsFormPanel(
                         }
                         is ListeningQuestion.Matching -> {
                             MatchingWidget(
+                                questionText = question.questionText,
                                 selectedCategory = answer,
                                 categories = question.categories,
                                 isFrozen = isFrozen,
@@ -666,6 +661,13 @@ private fun FormCompletionWidget(
     onValueChange: (String) -> Unit
 ) {
     Column {
+        Text(
+            text = "Fill-in-the-Blanks (Type Answer):",
+            color = SurfaceCyan,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
@@ -720,7 +722,7 @@ private fun MultipleChoiceWidget(
             val letter = option.substringBefore(". ").trim()
             val isSelected = selectedOption == letter
 
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
@@ -731,8 +733,19 @@ private fun MultipleChoiceWidget(
                         shape = RoundedCornerShape(8.dp)
                     )
                     .clickable(enabled = !isFrozen) { onSelect(letter) }
-                    .padding(12.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                RadioButton(
+                    selected = isSelected,
+                    onClick = { if (!isFrozen) onSelect(letter) },
+                    enabled = !isFrozen,
+                    colors = RadioButtonDefaults.colors(
+                        selectedColor = SurfaceCyan,
+                        unselectedColor = TextMuted
+                    )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = option,
                     color = if (isSelected) SurfaceCyan else TextLight,
@@ -869,39 +882,79 @@ private fun CoordinateTextOverlay(
 
 @Composable
 private fun MatchingWidget(
+    questionText: String,
     selectedCategory: String,
     categories: List<String>,
     isFrozen: Boolean,
     onSelect: (String) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    Card(
+        colors = CardDefaults.cardColors(containerColor = SurfaceSlate),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, SurfaceSlateLight),
+        modifier = Modifier.fillMaxWidth()
     ) {
-        categories.forEach { category ->
-            val isSelected = selectedCategory == category
-
-            Box(
+        Column(modifier = Modifier.padding(12.dp)) {
+            // Header Row
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSelected) SurfaceCyan.copy(alpha = 0.12f) else SurfaceSlate)
-                    .border(
-                        width = 1.dp,
-                        color = if (isSelected) SurfaceCyan else SurfaceSlateLight,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .clickable(enabled = !isFrozen) { onSelect(category) }
-                    .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .background(SurfaceSlateLight)
+                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = category,
-                    color = if (isSelected) SurfaceCyan else TextLight,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
+                    text = "Question Item",
+                    color = SurfaceCyan,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1.5f)
                 )
+                categories.forEach { category ->
+                    Text(
+                        text = category.replace("_", " "),
+                        color = SurfaceCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            HorizontalDivider(color = SurfaceSlateLight)
+
+            // Data Row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = questionText,
+                    color = TextLight,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1.5f)
+                )
+                categories.forEach { category ->
+                    val isSelected = selectedCategory == category
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        RadioButton(
+                            selected = isSelected,
+                            onClick = { if (!isFrozen) onSelect(category) },
+                            enabled = !isFrozen,
+                            colors = RadioButtonDefaults.colors(
+                                selectedColor = SurfaceCyan,
+                                unselectedColor = TextMuted
+                            )
+                        )
+                    }
+                }
             }
         }
     }
