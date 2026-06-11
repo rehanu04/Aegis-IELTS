@@ -71,7 +71,6 @@ fun ListeningAssessmentScreen(
                         playbackProgress = playbackProgress,
                         onNavigateBack = { viewModel.resetToIdle() },
                         onSaveAnswer = { qId, ans -> viewModel.saveAnswer(qId, ans) },
-                        onNextSection = { viewModel.advanceToNextSection() },
                         onSubmitTest = { viewModel.submitListeningTest() },
                         onStartSectionAudio = { viewModel.startSectionAudio() }
                     )
@@ -298,200 +297,193 @@ private fun ListeningActiveContent(
     playbackProgress: Float,
     onNavigateBack: () -> Unit,
     onSaveAnswer: (String, String) -> Unit,
-    onNextSection: () -> Unit,
     onSubmitTest: () -> Unit,
     onStartSectionAudio: () -> Unit
 ) {
-    val section = state.currentSection
+    // Combine questions from all active sections
+    val allQuestions = remember(state.sections) {
+        state.sections.flatMap { it.questions }
+    }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Active Header Bar
-        Row(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .background(SurfaceSlate)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .fillMaxSize()
+                .padding(bottom = 88.dp) // Leave space for persistent control bar
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onNavigateBack, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Quit",
-                        tint = TextLight
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column {
+            // Active Header Bar
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SurfaceSlate)
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onNavigateBack, modifier = Modifier.size(36.dp)) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Quit",
+                            tint = TextLight
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Section ${section.sectionNumber} of 4",
+                        text = "IELTS Listening Simulation Workspace",
                         color = TextLight,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
+                }
+
+                Button(
+                    onClick = onSubmitTest,
+                    enabled = !state.isFrozen,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
                     Text(
-                        text = "Accent: ${section.accent.label}",
-                        color = SurfaceCyan,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
+                        text = "Submit Exam",
+                        color = SurfaceSlate,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
                     )
                 }
             }
 
-            // Next / Submit Button
-            val isLast = state.currentSectionIndex == 3
-            Button(
-                onClick = { if (isLast) onSubmitTest() else onNextSection() },
-                enabled = !state.isFrozen,
-                colors = ButtonDefaults.buttonColors(containerColor = if (isLast) AccentGreen else SurfaceCyan),
-                shape = RoundedCornerShape(8.dp)
+            // Single, continuous vertically scrollable LazyColumn question pool
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
-                    text = if (isLast) "Submit Exam" else "Next Section",
-                    color = SurfaceSlate,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp
-                )
+                item {
+                    // Overall instructions
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SurfaceSlateLight),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "EXAM DIRECTIONS",
+                                color = SurfaceCyan,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "You may preview all questions below before starting the audio playback. Once ready, click 'Play Audio' in the bottom controller bar to start the listening track. Answers must be completed as you listen.",
+                                color = TextMuted,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
+                }
+
+                items(allQuestions.size) { index ->
+                    val question = allQuestions[index]
+                    val answer = answers[question.id].orEmpty()
+                    val error = inputErrors[question.id]
+                    QuestionCard(
+                        index = index,
+                        question = question,
+                        answer = answer,
+                        error = error,
+                        isFrozen = state.isFrozen,
+                        onSaveAnswer = onSaveAnswer
+                    )
+                }
             }
         }
 
-        if (!state.isAudioStarted) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+        // Persistent Anchored Bottom Audio Controller Bar
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(88.dp)
+                .background(SurfaceSlate)
+                .border(width = 1.dp, color = SurfaceSlateLight)
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = SurfaceSlateLight),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(0.9f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = AccentGreen,
-                            modifier = Modifier.size(64.dp)
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Text(
-                            text = "START SECTION ${section.sectionNumber}",
-                            color = TextLight,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "This section contains ${section.questions.size} questions.\n\nOnce clicked, the un-pausable, forward-only audio playback timeline will begin. Ensure your volume is correct.",
-                            color = TextMuted,
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyMedium,
-                            lineHeight = 22.sp
-                        )
-                        Spacer(modifier = Modifier.height(32.dp))
-                        Button(
-                            onClick = onStartSectionAudio,
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().height(50.dp)
-                        ) {
-                            Text(
-                                text = "Start Test",
-                                color = SurfaceSlate,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            // Canvas-Isolated Progress Bar (bypasses tween transitions)
-            CanvasIsolatedProgressBar(
-                progress = playbackProgress,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-            )
-
-            // Split view or stacked layouts
-            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val isCompact = maxWidth < 768.dp
-
-            if (isCompact) {
-                LazyColumn(
+                // Play Button
+                Button(
+                    onClick = onStartSectionAudio,
+                    enabled = !state.isAudioStarted && !state.isFrozen,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (state.isAudioStarted) SurfaceSlateLight else AccentGreen,
+                        disabledContainerColor = SurfaceSlateLight
+                    ),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .width(140.dp)
+                        .height(48.dp)
                 ) {
-                    item {
-                        SectionOverviewPanel(section = section)
+                    val icon = if (state.isAudioStarted && state.isAudioPlaying) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.PlayArrow
+                    val text = if (state.isAudioStarted) {
+                        if (state.isAudioPlaying) "Playing..." else "Completed"
+                    } else {
+                        "Play Audio"
                     }
-                    items(section.questions.size) { index ->
-                        val question = section.questions[index]
-                        val answer = answers[question.id].orEmpty()
-                        val error = inputErrors[question.id]
-                        QuestionCard(
-                            index = index,
-                            question = question,
-                            answer = answer,
-                            error = error,
-                            isFrozen = state.isFrozen,
-                            onSaveAnswer = onSaveAnswer
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (state.isAudioStarted) TextMuted else SurfaceSlate,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = text,
+                        color = if (state.isAudioStarted) TextMuted else SurfaceSlate,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                // Progress Indicator Line & metrics domain mapping
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Exam Timeline Progress",
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "${(playbackProgress * 100).toInt()}%",
+                            color = SurfaceCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                }
-            } else {
-                Row(modifier = Modifier.fillMaxSize()) {
-                    // Left Column: Environment description and instructions
-                    Box(
+                    Spacer(modifier = Modifier.height(6.dp))
+                    CanvasIsolatedProgressBar(
+                        progress = playbackProgress,
                         modifier = Modifier
-                            .weight(0.9f)
-                            .fillMaxHeight()
-                            .padding(20.dp)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        SectionOverviewPanel(section = section)
-                    }
-
-                    VerticalDivider(color = SurfaceSlateLight, thickness = 1.dp)
-
-                    // Right Column: Interactive nodes
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1.1f)
-                            .fillMaxHeight()
-                            .background(SurfaceSlateLight)
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        items(section.questions.size) { index ->
-                            val question = section.questions[index]
-                            val answer = answers[question.id].orEmpty()
-                            val error = inputErrors[question.id]
-                            QuestionCard(
-                                index = index,
-                                question = question,
-                                answer = answer,
-                                error = error,
-                                isFrozen = state.isFrozen,
-                                onSaveAnswer = onSaveAnswer
-                            )
-                        }
-                    }
+                            .fillMaxWidth()
+                            .height(6.dp)
+                    )
                 }
             }
         }
     }
-}
 }
 
 /**

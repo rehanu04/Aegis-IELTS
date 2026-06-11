@@ -251,18 +251,16 @@ class ListeningViewModel @Inject constructor(
         _inputErrors.value = emptyMap()
         _audioPlaybackProgress.value = 0f
 
-        _uiState.value = ListeningUiState.PendingStart(activeSections)
-    }
-
-    fun beginPlaybackFromPending() {
-        val currentState = _uiState.value as? ListeningUiState.PendingStart ?: return
-        
         _uiState.value = ListeningUiState.Active(
-            sections = currentState.sections,
+            sections = activeSections,
             currentSectionIndex = 0,
             isAudioPlaying = false,
             isAudioStarted = false
         )
+    }
+
+    fun beginPlaybackFromPending() {
+        // Obsolete in single-screen container
     }
 
     fun startSectionAudio() {
@@ -279,7 +277,6 @@ class ListeningViewModel @Inject constructor(
     private fun playCurrentSectionAudio(section: ListeningSection) {
         playbackStateJob?.cancel()
         progressTickerJob?.cancel()
-        _audioPlaybackProgress.value = 0f
 
         viewModelScope.launch {
             try {
@@ -324,7 +321,6 @@ class ListeningViewModel @Inject constructor(
                     is PlaybackState.Completed -> {
                         updateActiveAudioPlayingState(false)
                         progressTickerJob?.cancel()
-                        _audioPlaybackProgress.value = 1f
                         advanceToNextSection()
                     }
                     is PlaybackState.Error -> {
@@ -342,13 +338,15 @@ class ListeningViewModel @Inject constructor(
         progressTickerJob?.cancel()
         progressTickerJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             while (true) {
+                val currentState = _uiState.value as? ListeningUiState.Active
+                val currentIdx = currentState?.currentSectionIndex ?: 0
                 val duration = audioPlaybackEngine.getDuration()
                 val position = audioPlaybackEngine.getCurrentPosition()
                 if (duration > 0) {
-                    val progress = position.toFloat() / duration.toFloat()
-                    _audioPlaybackProgress.value = progress.coerceIn(0f, 1f)
+                    val sectionProgress = position.toFloat() / duration.toFloat()
+                    _audioPlaybackProgress.value = ((currentIdx.toFloat() + sectionProgress) / 4f).coerceIn(0f, 1f)
                 } else {
-                    _audioPlaybackProgress.value = 0f
+                    _audioPlaybackProgress.value = (currentIdx.toFloat() / 4f).coerceIn(0f, 1f)
                 }
                 delay(200)
             }
@@ -364,9 +362,11 @@ class ListeningViewModel @Inject constructor(
             while (elapsed < totalSeconds) {
                 delay(1000)
                 elapsed += 1.0f
-                _audioPlaybackProgress.value = (elapsed / totalSeconds).coerceIn(0f, 1f)
+                val currentState = _uiState.value as? ListeningUiState.Active
+                val currentIdx = currentState?.currentSectionIndex ?: 0
+                val sectionProgress = elapsed / totalSeconds
+                _audioPlaybackProgress.value = ((currentIdx.toFloat() + sectionProgress) / 4f).coerceIn(0f, 1f)
             }
-            _audioPlaybackProgress.value = 1f
             updateActiveAudioPlayingState(false)
             advanceToNextSection()
         }
@@ -436,16 +436,18 @@ class ListeningViewModel @Inject constructor(
             val nextIndex = currentState.currentSectionIndex + 1
             _uiState.value = currentState.copy(
                 currentSectionIndex = nextIndex,
-                isAudioPlaying = false,
-                isAudioStarted = false
+                isAudioPlaying = true,
+                isAudioStarted = true
             )
-            // Stop previous ExoPlayer audio
+            // Stop previous ExoPlayer audio and play next
             viewModelScope.launch {
                 audioPlaybackEngine.stop()
+                playCurrentSectionAudio(currentState.sections[nextIndex])
             }
         } else {
-            // Already at last section, trigger submit
-            submitListeningTest()
+            // Already at last section, playback completed!
+            updateActiveAudioPlayingState(false)
+            _audioPlaybackProgress.value = 1f
         }
     }
 
