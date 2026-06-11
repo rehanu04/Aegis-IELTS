@@ -44,6 +44,7 @@ fun ListeningAssessmentScreen(
             .fillMaxSize()
             .background(SurfaceSlate)
             .systemBarsPadding()
+            .navigationBarsPadding()
     ) {
         Crossfade(targetState = uiState, label = "ListeningStateCrossfade") { state ->
             when (state) {
@@ -51,6 +52,12 @@ fun ListeningAssessmentScreen(
                     ListeningIdleContent(
                         onStartTest = { viewModel.startListeningAssessment() },
                         onNavigateBack = onNavigateBack
+                    )
+                }
+                is ListeningUiState.PendingStart -> {
+                    ListeningPendingStartContent(
+                        onStartTest = { viewModel.beginPlaybackFromPending() },
+                        onNavigateBack = { viewModel.resetToIdle() }
                     )
                 }
                 is ListeningUiState.Active -> {
@@ -62,7 +69,8 @@ fun ListeningAssessmentScreen(
                         onNavigateBack = { viewModel.resetToIdle() },
                         onSaveAnswer = { qId, ans -> viewModel.saveAnswer(qId, ans) },
                         onNextSection = { viewModel.advanceToNextSection() },
-                        onSubmitTest = { viewModel.submitListeningTest() }
+                        onSubmitTest = { viewModel.submitListeningTest() },
+                        onStartSectionAudio = { viewModel.startSectionAudio() }
                     )
                 }
                 is ListeningUiState.EvaluationComplete -> {
@@ -212,6 +220,71 @@ private fun InstructionItem(
     }
 }
 
+@Composable
+private fun ListeningPendingStartContent(
+    onStartTest: () -> Unit,
+    onNavigateBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+            contentDescription = null,
+            tint = AccentGreen,
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "SOUND CHECK",
+            color = TextLight,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.5.sp
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Please ensure your headphones are connected and the volume is set to a comfortable level.\n\nThe audio will begin immediately and play exactly once. You cannot pause or rewind.",
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodyLarge,
+            lineHeight = 24.sp
+        )
+        Spacer(modifier = Modifier.height(48.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(0.9f),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            OutlinedButton(
+                onClick = onNavigateBack,
+                border = BorderStroke(1.dp, SurfaceSlateLight),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.weight(1f).height(50.dp)
+            ) {
+                Text("Cancel")
+            }
+            Button(
+                onClick = onStartTest,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.weight(1.5f).height(50.dp)
+            ) {
+                Text(
+                    text = "Start Test",
+                    color = SurfaceSlate,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
 // ─── Active Test Content ──────────────────────────────────────────────────────
 
 @Composable
@@ -223,7 +296,8 @@ private fun ListeningActiveContent(
     onNavigateBack: () -> Unit,
     onSaveAnswer: (String, String) -> Unit,
     onNextSection: () -> Unit,
-    onSubmitTest: () -> Unit
+    onSubmitTest: () -> Unit,
+    onStartSectionAudio: () -> Unit
 ) {
     val section = state.currentSection
 
@@ -279,16 +353,73 @@ private fun ListeningActiveContent(
             }
         }
 
-        // Canvas-Isolated Progress Bar (bypasses tween transitions)
-        CanvasIsolatedProgressBar(
-            progress = playbackProgress,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(6.dp)
-        )
+        if (!state.isAudioStarted) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp)
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SurfaceSlateLight),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = AccentGreen,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text(
+                            text = "START SECTION ${section.sectionNumber}",
+                            color = TextLight,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "This section contains ${section.questions.size} questions.\n\nOnce clicked, the un-pausable, forward-only audio playback timeline will begin. Ensure your volume is correct.",
+                            color = TextMuted,
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 22.sp
+                        )
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Button(
+                            onClick = onStartSectionAudio,
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth().height(50.dp)
+                        ) {
+                            Text(
+                                text = "Start Listening Section",
+                                color = SurfaceSlate,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Canvas-Isolated Progress Bar (bypasses tween transitions)
+            CanvasIsolatedProgressBar(
+                progress = playbackProgress,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+            )
 
-        // Split view or stacked layouts
-        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            // Split view or stacked layouts
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val isCompact = maxWidth < 768.dp
 
             if (isCompact) {
@@ -344,6 +475,7 @@ private fun ListeningActiveContent(
             }
         }
     }
+}
 }
 
 /**

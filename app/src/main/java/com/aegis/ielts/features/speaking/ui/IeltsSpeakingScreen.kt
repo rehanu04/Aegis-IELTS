@@ -49,6 +49,50 @@ fun IeltsSpeakingAssessmentScreen(
     val elapsedSeconds by viewModel.elapsedSeconds.collectAsStateWithLifecycle()
     val rawAmplitudeDb by viewModel.currentAmplitudeDb.collectAsStateWithLifecycle()
 
+    var tts by remember { mutableStateOf<android.speech.tts.TextToSpeech?>(null) }
+    var ttsInitialized by remember { mutableStateOf(false) }
+
+    DisposableEffect(ctx) {
+        val ttsEngine = android.speech.tts.TextToSpeech(ctx) { status ->
+            if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                ttsInitialized = true
+            }
+        }
+        ttsEngine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                if (utteranceId == "EXAMINER_UTTERANCE") {
+                    viewModel.onExaminerSpeakingCompleted()
+                }
+            }
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {}
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                if (utteranceId == "EXAMINER_UTTERANCE") {
+                    viewModel.onExaminerSpeakingCompleted()
+                }
+            }
+        })
+        tts = ttsEngine
+        onDispose {
+            ttsEngine.stop()
+            ttsEngine.shutdown()
+        }
+    }
+
+    LaunchedEffect(currentUiState, ttsInitialized) {
+        val state = currentUiState
+        if (state is SpeakingUiState.MockTestActive &&
+            state.engineState == ExaminerEngineState.EXAMINER_SPEAKING &&
+            ttsInitialized
+        ) {
+            val params = android.os.Bundle().apply {
+                putInt(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_STREAM, android.media.AudioManager.STREAM_MUSIC)
+            }
+            tts?.speak(state.promptText, android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "EXAMINER_UTTERANCE")
+        }
+    }
+
     var hasMicPermission by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
     }
@@ -120,6 +164,7 @@ fun IeltsSpeakingAssessmentScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .navigationBarsPadding()
         ) {
             StarfieldBackground()
 

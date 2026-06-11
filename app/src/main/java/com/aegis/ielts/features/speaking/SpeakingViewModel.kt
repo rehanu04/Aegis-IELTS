@@ -105,30 +105,26 @@ class SpeakingViewModel @Inject constructor(
                 return@launch
             }
 
+            val promptText = "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
             _uiState.value = SpeakingUiState.MockTestActive(
-                engineState = ExaminerEngineState.EXAMINER_SPEAKING
+                engineState = ExaminerEngineState.EXAMINER_SPEAKING,
+                promptText = promptText
             )
             
-            // Step 1: Examiner speaking phase
-            // We attempt to play an asset. If it fails (e.g. missing file), we catch the error 
-            // and proceed to the next state to ensure the pipeline doesn't hang.
-            val promptText = "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
-            val prompts = listOf(promptText)
-            
+            // Play asset as fallback or audio indicator
             try {
                 audioPlaybackEngine.playFromAsset("audio/part1_intro.mp3")
             } catch (e: Exception) {
                 // Ignore missing asset exceptions during mock phase
             }
+        }
+    }
 
-            // Wait for playback to finish (or error out if file is missing)
-            audioPlaybackEngine.playbackState.collect { state ->
-                if (state is PlaybackState.Completed || state is PlaybackState.Error) {
-                    // Step 2: Transition to CANDIDATE_RECORDING automatically
-                    transitionToRecording(prompts)
-                    // Cancel collection once we've transitioned
-                    throw kotlinx.coroutines.CancellationException("Playback finished")
-                }
+    fun onExaminerSpeakingCompleted() {
+        val currentState = _uiState.value as? SpeakingUiState.MockTestActive ?: return
+        if (currentState.engineState == ExaminerEngineState.EXAMINER_SPEAKING) {
+            viewModelScope.launch {
+                transitionToRecording(listOf(currentState.promptText))
             }
         }
     }

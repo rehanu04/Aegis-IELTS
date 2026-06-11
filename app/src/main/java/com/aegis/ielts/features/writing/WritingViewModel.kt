@@ -82,8 +82,19 @@ class WritingViewModel @Inject constructor(
         if (currentState.isFrozen) return
 
         val essay = _essayText.value
-        if (essay.trim().isEmpty()) {
-            _uiState.value = WritingUiState.Error("Your essay submission is empty. Please write a response before submitting.")
+        val words = essay.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.size < 10) {
+            // Apply zero-attempt criteria
+            val zeroResponse = WritingAssessmentResponse(
+                taskAchievementScore = 0.0f,
+                coherenceScore = 0.0f,
+                lexicalScore = 0.0f,
+                grammarScore = 0.0f,
+                feedback = "Band 0.0: Non-attempt / Under 10 rateable words. The response contains only ${words.size} words.",
+                templateDetected = false,
+                templateSimilarityScore = 0.0f
+            )
+            _uiState.value = WritingUiState.EvaluationComplete(currentState.task, zeroResponse)
             return
         }
 
@@ -119,6 +130,18 @@ class WritingViewModel @Inject constructor(
     private fun runLocalWritingAssessment(task: WritingTask, essay: String): WritingAssessmentResponse {
         val words = essay.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
         val wordCount = words.size
+
+        if (wordCount < 10) {
+            return WritingAssessmentResponse(
+                taskAchievementScore = 0.0f,
+                coherenceScore = 0.0f,
+                lexicalScore = 0.0f,
+                grammarScore = 0.0f,
+                feedback = "Band 0.0: Non-attempt / Under 10 rateable words. The response contains only $wordCount words.",
+                templateDetected = false,
+                templateSimilarityScore = 0.0f
+            )
+        }
 
         // 1. Task Achievement: penalized if word count is below the minimum limit
         val wordFraction = if (task.minWords > 0) wordCount.toFloat() / task.minWords.toFloat() else 1f

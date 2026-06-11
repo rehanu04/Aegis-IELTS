@@ -145,14 +145,11 @@ class GeminiRepository @Inject constructor(
      */
     suspend fun pingBackend(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            val url = URL("${GeminiApiClient.BACKEND_URL}/docs")
+            val url = URL("${GeminiApiClient.BACKEND_URL}/api/v1/health")
             val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "POST"
+            conn.requestMethod = "GET"
             conn.connectTimeout = 60000 // High timeout for cold start
             conn.readTimeout = 60000
-            conn.doOutput = true
-            conn.setFixedLengthStreamingMode(0)
-            conn.outputStream.use { it.write(byteArrayOf()) }
             conn.connect()
             
             if (conn.responseCode in 200..499) {

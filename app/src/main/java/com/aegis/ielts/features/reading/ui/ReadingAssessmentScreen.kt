@@ -53,6 +53,7 @@ fun ReadingAssessmentScreen(
             .fillMaxSize()
             .background(SurfaceSlate)
             .systemBarsPadding()
+            .navigationBarsPadding()
     ) {
         // Main State Routing
         Crossfade(targetState = uiState, label = "ReadingStateCrossfade") { state ->

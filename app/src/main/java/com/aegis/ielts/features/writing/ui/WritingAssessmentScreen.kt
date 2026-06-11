@@ -43,6 +43,7 @@ fun WritingAssessmentScreen(
             .fillMaxSize()
             .background(SurfaceSlate)
             .systemBarsPadding()
+            .navigationBarsPadding()
     ) {
         Crossfade(targetState = uiState, label = "WritingStateCrossfade") { state ->
             when (state) {
@@ -400,12 +401,14 @@ private fun ActiveWritingHeader(
                 containerColor = AccentGreen,
                 disabledContainerColor = SurfaceSlateLight
             ),
-            shape = RoundedCornerShape(8.dp)
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
             Text(
                 text = "Submit Essay",
                 color = if (isFrozen) TextMuted else SurfaceSlate,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
             )
         }
     }

@@ -232,14 +232,29 @@ class ListeningViewModel @Inject constructor(
         _inputErrors.value = emptyMap()
         _audioPlaybackProgress.value = 0f
 
-        _uiState.value = ListeningUiState.Active(
-            sections = activeSections,
-            currentSectionIndex = 0,
-            isAudioPlaying = false
-        )
+        _uiState.value = ListeningUiState.PendingStart(activeSections)
+    }
 
-        // Automatically launch audio for section 0
-        playCurrentSectionAudio(activeSections[0])
+    fun beginPlaybackFromPending() {
+        val currentState = _uiState.value as? ListeningUiState.PendingStart ?: return
+        
+        _uiState.value = ListeningUiState.Active(
+            sections = currentState.sections,
+            currentSectionIndex = 0,
+            isAudioPlaying = false,
+            isAudioStarted = false
+        )
+    }
+
+    fun startSectionAudio() {
+        val currentState = _uiState.value as? ListeningUiState.Active ?: return
+        if (currentState.isAudioStarted) return
+        
+        _uiState.value = currentState.copy(
+            isAudioStarted = true
+        )
+        
+        playCurrentSectionAudio(currentState.currentSection)
     }
 
     private fun playCurrentSectionAudio(section: ListeningSection) {
@@ -360,13 +375,13 @@ class ListeningViewModel @Inject constructor(
             val nextIndex = currentState.currentSectionIndex + 1
             _uiState.value = currentState.copy(
                 currentSectionIndex = nextIndex,
-                isAudioPlaying = false
+                isAudioPlaying = false,
+                isAudioStarted = false
             )
-            // Stop previous ExoPlayer audio and start the new one
+            // Stop previous ExoPlayer audio
             viewModelScope.launch {
                 audioPlaybackEngine.stop()
             }
-            playCurrentSectionAudio(currentState.sections[nextIndex])
         } else {
             // Already at last section, trigger submit
             submitListeningTest()

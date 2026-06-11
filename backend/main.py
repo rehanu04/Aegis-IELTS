@@ -158,6 +158,11 @@ class WritingAssessmentResponse(BaseModel):
 
 # ─── REST Routing Endpoints ───────────────────────────────────────────────────
 
+@app.get("/api/v1/health")
+async def health_check():
+    """Lightweight server heartbeat for waking up Render."""
+    return {"status": "synchronized"}
+
 @app.post("/api/v1/grade/writing", response_model=WritingAssessmentResponse)
 async def grade_writing(request: WritingGradeRequest):
     """
@@ -166,10 +171,14 @@ async def grade_writing(request: WritingGradeRequest):
     """
     logger.info(f"Received writing grade request for Task {request.task_type}")
 
-    if not request.essay or len(request.essay.split()) < 50:
-        raise HTTPException(
-            status_code=400,
-            detail="Essay too short or empty. Please write a substantial response."
+    words = request.essay.split()
+    if not request.essay or len(words) < 10:
+        logger.info("Empty or short essay (under 10 words) detected. Returning zero band scores.")
+        return WritingAssessmentResponse(
+            criteriaScores=WritingCriteriaScores(taskAchievement=0.0, coherenceCohesion=0.0, lexicalResource=0.0, grammaticalRangeAccuracy=0.0),
+            templateDetection=TemplateDetectionResult(templateDetected=False, templateSimilarityScore=0.0, lexicalAsymmetryIndex=0.0),
+            grammarCorrections=[],
+            overallFeedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."
         )
 
     system_instruction = """
@@ -222,11 +231,22 @@ async def grade_writing(request: WritingGradeRequest):
 
 @app.post("/api/v1/grade/speaking", response_model=SpeakingAssessmentResponse)
 async def grade_speaking(request: SpeakingGradeRequest):
-    """
-    Grades IELTS speaking transcripts by evaluating hesitation pauses
-    and counting filler word frequencies.
-    """
     logger.info("Received speaking grade request")
+    words = request.transcript.split()
+    if not request.transcript or len(words) < 10:
+        logger.info("Empty or short transcript (under 10 words) detected. Returning zero band scores.")
+        return SpeakingAssessmentResponse(
+            fluencyCoherence=FluencyCoherenceMetric(
+                score=0.0,
+                feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words.",
+                hesitationProfile=HesitationProfile(withinClausePauses=0, betweenClausePauses=0, totalSilenceMs=0),
+                fillerDensityIndex=0.0
+            ),
+            lexicalResource=LexicalAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words.", lexicalAsymmetryIndex=0.0),
+            grammaticalRangeAccuracy=GrammarAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."),
+            pronunciation=PronunciationAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."),
+            overallFeedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {len(words)} words."
+        )
 
     system_instruction = """
     You are a certified IELTS Speaking examiner. Evaluate the candidate's performance
@@ -305,6 +325,14 @@ def local_writing_assessment(task_type: int, essay: str) -> WritingAssessmentRes
     word_count = len(words)
     min_words = 150 if task_type == 1 else 250
 
+    if word_count < 10:
+        return WritingAssessmentResponse(
+            criteriaScores=WritingCriteriaScores(taskAchievement=0.0, coherenceCohesion=0.0, lexicalResource=0.0, grammaticalRangeAccuracy=0.0),
+            templateDetection=TemplateDetectionResult(templateDetected=False, templateSimilarityScore=0.0, lexicalAsymmetryIndex=0.0),
+            grammarCorrections=[],
+            overallFeedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."
+        )
+
     word_fraction = min(1.0, word_count / min_words) if min_words > 0 else 1.0
     ta_score = round(word_fraction * 7.5 * 2) / 2.0
     ta_score = max(1.0, min(9.0, ta_score))
@@ -362,6 +390,19 @@ def local_speaking_assessment(transcript: str) -> SpeakingAssessmentResponse:
     logger.info("Running local mock speaking evaluation fallback")
     words = transcript.strip().split()
     word_count = len(words)
+    if word_count < 10:
+        return SpeakingAssessmentResponse(
+            fluencyCoherence=FluencyCoherenceMetric(
+                score=0.0,
+                feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words.",
+                hesitationProfile=HesitationProfile(withinClausePauses=0, betweenClausePauses=0, totalSilenceMs=0),
+                fillerDensityIndex=0.0
+            ),
+            lexicalResource=LexicalAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words.", lexicalAsymmetryIndex=0.0),
+            grammaticalRangeAccuracy=GrammarAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."),
+            pronunciation=PronunciationAssessmentMetric(score=0.0, feedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."),
+            overallFeedback=f"Band 0.0: Non-attempt / Under 10 rateable words. The response contains only {word_count} words."
+        )
 
     # Detect hesitation pauses and fillers
     fillers = ["um", "ah", "like", "you know"]

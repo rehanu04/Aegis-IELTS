@@ -23,7 +23,8 @@ sealed class SpeakingUiState {
      * diagnostic label displayed to the candidate.
      */
     data class MockTestActive(
-        val engineState: ExaminerEngineState
+        val engineState: ExaminerEngineState,
+        val promptText: String = "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
     ) : SpeakingUiState()
 
     /**
