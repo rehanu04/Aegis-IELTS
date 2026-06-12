@@ -55,10 +55,16 @@ class ListeningViewModel @Inject constructor(
     private val _audioPlaybackProgress = MutableStateFlow(0f)
     val audioPlaybackProgress: StateFlow<Float> = _audioPlaybackProgress.asStateFlow()
 
+    private val _audioBufferProgress = MutableStateFlow(0f)
+    val audioBufferProgress: StateFlow<Float> = _audioBufferProgress.asStateFlow()
+
     private var playbackStateJob: Job? = null
     private var progressTickerJob: Job? = null
 
     // ─── Actions ──────────────────────────────────────────────────────────────
+    
+    // ... rest of actions ...
+
 
     /**
      * Samples accents according to probabilities and shuffles sections (Unpredictable Task Router).
@@ -280,33 +286,16 @@ class ListeningViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                audioPlaybackEngine.playFromAsset(section.audioAssetPath)
+                val isPoolB = section.audioAssetPath.contains("_b")
+                val streamUrl = "${com.aegis.ielts.core.network.GeminiApiClient.BACKEND_URL}/api/v1/listening/stream" +
+                        "?section_number=${section.sectionNumber}" +
+                        "&accent=${java.net.URLEncoder.encode(section.accent.label, "UTF-8")}" +
+                        "&environment_label=${java.net.URLEncoder.encode(section.environment.label, "UTF-8")}" +
+                        "&environment_description=${java.net.URLEncoder.encode(section.environment.description, "UTF-8")}" +
+                        "&is_pool_b=$isPoolB"
+                audioPlaybackEngine.playFromUri(Uri.parse(streamUrl))
             } catch (e: Exception) {
-                // If asset is missing in emulator/build environment, fetch from backend
-                try {
-                    val audioBytes = geminiRepository.fetchListeningAudio(
-                        sectionNumber = section.sectionNumber,
-                        environmentLabel = section.environment.label,
-                        environmentDescription = section.environment.description,
-                        accentLabel = section.accent.label
-                    )
-                    val responseStr = String(audioBytes, Charsets.UTF_8)
-                    if (responseStr.trim().startsWith("{") && responseStr.contains("fallback_to_local")) {
-                        val fallbackPath = try {
-                            val jsonObject = org.json.JSONObject(responseStr)
-                            jsonObject.optString("local_asset_path", section.audioAssetPath)
-                        } catch (e: Exception) {
-                            section.audioAssetPath
-                        }
-                        audioPlaybackEngine.playFromAsset(fallbackPath)
-                    } else {
-                        val cacheFile = File(context.cacheDir, "listening_temp_sec_${section.sectionNumber}.mp3")
-                        cacheFile.writeBytes(audioBytes)
-                        audioPlaybackEngine.playFromUri(Uri.fromFile(cacheFile))
-                    }
-                } catch (ex: Exception) {
-                    simulateAudioPlaybackProgress()
-                }
+                _uiState.value = ListeningUiState.Error("Network error: Failed to connect to streaming audio endpoint.")
             }
         }
 
@@ -326,9 +315,11 @@ class ListeningViewModel @Inject constructor(
                     is PlaybackState.Error -> {
                         updateActiveAudioPlayingState(false)
                         progressTickerJob?.cancel()
-                        simulateAudioPlaybackProgress()
+                        _uiState.value = ListeningUiState.Error(state.message)
                     }
-                    else -> {}
+                    is PlaybackState.Loading, PlaybackState.Idle -> {
+                        progressTickerJob?.cancel()
+                    }
                 }
             }
         }
@@ -342,33 +333,19 @@ class ListeningViewModel @Inject constructor(
                 val currentIdx = currentState?.currentSectionIndex ?: 0
                 val duration = audioPlaybackEngine.getDuration()
                 val position = audioPlaybackEngine.getCurrentPosition()
+                val buffered = audioPlaybackEngine.getBufferedPosition()
                 if (duration > 0) {
                     val sectionProgress = position.toFloat() / duration.toFloat()
                     _audioPlaybackProgress.value = ((currentIdx.toFloat() + sectionProgress) / 4f).coerceIn(0f, 1f)
+
+                    val sectionBuffer = buffered.toFloat() / duration.toFloat()
+                    _audioBufferProgress.value = ((currentIdx.toFloat() + sectionBuffer) / 4f).coerceIn(0f, 1f)
                 } else {
                     _audioPlaybackProgress.value = (currentIdx.toFloat() / 4f).coerceIn(0f, 1f)
+                    _audioBufferProgress.value = (currentIdx.toFloat() / 4f).coerceIn(0f, 1f)
                 }
                 delay(200)
             }
-        }
-    }
-
-    private fun simulateAudioPlaybackProgress() {
-        updateActiveAudioPlayingState(true)
-        progressTickerJob?.cancel()
-        progressTickerJob = viewModelScope.launch {
-            val totalSeconds = 300f // 5 minutes standard official section length
-            var elapsed = 0f
-            while (elapsed < totalSeconds) {
-                delay(1000)
-                elapsed += 1.0f
-                val currentState = _uiState.value as? ListeningUiState.Active
-                val currentIdx = currentState?.currentSectionIndex ?: 0
-                val sectionProgress = elapsed / totalSeconds
-                _audioPlaybackProgress.value = ((currentIdx.toFloat() + sectionProgress) / 4f).coerceIn(0f, 1f)
-            }
-            updateActiveAudioPlayingState(false)
-            advanceToNextSection()
         }
     }
 

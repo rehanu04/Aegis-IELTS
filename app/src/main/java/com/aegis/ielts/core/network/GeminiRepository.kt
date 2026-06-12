@@ -2,6 +2,8 @@ package com.aegis.ielts.core.network
 
 import com.aegis.ielts.core.domain.SpeakingAssessmentResponse
 import com.aegis.ielts.core.domain.WritingAssessmentResponse
+import com.aegis.ielts.core.domain.SpeakingNextQuestionRequest
+import com.aegis.ielts.core.domain.SpeakingNextQuestionResponse
 import com.google.ai.client.generativeai.GenerativeModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +69,12 @@ class GeminiRepository @Inject constructor(
                 ?: throw IOException("Gemini returned an empty response for speaking evaluation")
             json.decodeFromString<SpeakingAssessmentResponse>(jsonText)
         }
+    }
+
+    suspend fun fetchNextSpeakingQuestion(
+        request: SpeakingNextQuestionRequest
+    ): Result<SpeakingNextQuestionResponse> = runWithRetry {
+        postRequest<SpeakingNextQuestionRequest, SpeakingNextQuestionResponse>("/api/v1/speaking/next-question", request)
     }
 
     // ─── Writing Evaluation ───────────────────────────────────────────────────

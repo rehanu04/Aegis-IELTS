@@ -6,6 +6,8 @@ import com.aegis.ielts.core.audio.AudioCaptureEngine
 import com.aegis.ielts.core.audio.AudioPlaybackEngine
 import com.aegis.ielts.core.audio.PlaybackState
 import com.aegis.ielts.core.domain.SpeakingAssessmentResponse
+import com.aegis.ielts.core.domain.SpeakingNextQuestionRequest
+import com.aegis.ielts.core.domain.SpeakingNextQuestionResponse
 import com.aegis.ielts.core.network.GeminiRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -151,13 +153,6 @@ class SpeakingViewModel @Inject constructor(
                 currentPart = 1,
                 currentQuestionIndex = currentQuestionIdx
             )
-            
-            // Play asset as fallback or audio indicator
-            try {
-                audioPlaybackEngine.playFromAsset("audio/part1_intro.mp3")
-            } catch (e: Exception) {
-                // Ignore missing asset exceptions during mock phase
-            }
         }
     }
 
@@ -194,7 +189,7 @@ class SpeakingViewModel @Inject constructor(
         // Start capturing audio
         audioCaptureEngine.startCapture()
 
-        // VAD 3.5s silence monitor loop
+        // VAD 3.0s silence monitor loop (calibrated to standard IELTS speaking speed)
         var lastVoiceActivityTime = System.currentTimeMillis()
         var silenceTriggered = false
         val vadJob = viewModelScope.launch {
@@ -204,7 +199,7 @@ class SpeakingViewModel @Inject constructor(
                     lastVoiceActivityTime = System.currentTimeMillis()
                 } else {
                     val silenceDurationMs = System.currentTimeMillis() - lastVoiceActivityTime
-                    if (silenceDurationMs >= 3500L) { // 3.5 seconds
+                    if (silenceDurationMs >= 3000L) { // 3.0 seconds
                         silenceTriggered = true
                     }
                 }
@@ -224,74 +219,79 @@ class SpeakingViewModel @Inject constructor(
         val telemetry = audioCaptureEngine.silenceTelemetry
         stopTimer()
 
-        // Accumulate prompt and transcript
-        val currentPrompt = allQuestions[currentQuestionIdx]
-        val currentTranscript = if (currentQuestionIdx < dummyTranscripts.size) {
-            dummyTranscripts[currentQuestionIdx]
-        } else {
-            "Response to question $currentQuestionIdx"
-        }
-        accumulatedPrompts.add(currentPrompt)
-        accumulatedTranscripts.add(currentTranscript)
+        // Show loading state while communication with backend takes place
+        _uiState.value = SpeakingUiState.MockTestActive(
+            engineState = ExaminerEngineState.EXAMINER_SPEAKING,
+            promptText = "Let me think about that...",
+            currentPart = activePart,
+            currentQuestionIndex = activeQuestionIdx
+        )
 
-        if (currentQuestionIdx < 6) {
-            // Move to next question!
-            currentQuestionIdx++
-            val nextPart = if (currentQuestionIdx in 0..2) 1 else if (currentQuestionIdx == 3) 2 else 3
-            val nextPrompt = allQuestions[currentQuestionIdx]
-            
-            _uiState.value = SpeakingUiState.MockTestActive(
-                engineState = ExaminerEngineState.EXAMINER_SPEAKING,
-                promptText = nextPrompt,
-                currentPart = nextPart,
-                currentQuestionIndex = currentQuestionIdx
-            )
-            
-            // Optionally play an audio cue or intro when transitioning parts
-            if (currentQuestionIdx == 3) {
-                try {
-                    audioPlaybackEngine.playFromAsset("audio/part2_intro.mp3")
-                } catch (e: Exception) {}
-            } else if (currentQuestionIdx == 4) {
-                try {
-                    audioPlaybackEngine.playFromAsset("audio/part3_intro.mp3")
-                } catch (e: Exception) {}
-            }
-        } else {
-            // End of Part 3. Evaluate the entire combined transcripts and prompts!
-            _uiState.value = SpeakingUiState.MockTestActive(
-                engineState = ExaminerEngineState.ANALYZING,
-                promptText = "Evaluating Speaking Performance...",
-                currentPart = 3,
-                currentQuestionIndex = currentQuestionIdx
-            )
+        // Launch network request to get the follow-up question
+        val audioBase64 = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
+        val request = SpeakingNextQuestionRequest(
+            audio_base64 = audioBase64,
+            previous_transcript = null,
+            current_question_index = currentQuestionIdx,
+            current_part = activePart
+        )
 
-            val combinedTranscript = accumulatedTranscripts.joinToString("\n")
-            val combinedPrompts = accumulatedPrompts.toList()
-
-            // Step 4: Evaluate via Gemini
-            val result = geminiRepository.evaluateSpeaking(
-                audioBytes = audioBytes,
-                transcript = combinedTranscript,
-                prompts = combinedPrompts
-            )
-
+        try {
+            val result = geminiRepository.fetchNextSpeakingQuestion(request)
             result.onSuccess { response ->
-                // Inject captured telemetry into the response
-                val finalResponse = response.copy(silenceTelemetry = telemetry)
-                lastEvaluationResponse = finalResponse
-                isFinalFeedback = true
-                
-                // Transition back to EXAMINER_SPEAKING to speak feedback
-                _uiState.value = SpeakingUiState.MockTestActive(
-                    engineState = ExaminerEngineState.EXAMINER_SPEAKING,
-                    promptText = finalResponse.overallFeedback,
-                    currentPart = 3,
-                    currentQuestionIndex = currentQuestionIdx
-                )
+                accumulatedTranscripts.add(response.transcript)
+                accumulatedPrompts.add(currentState.promptText)
+
+                if (currentQuestionIdx < 6) {
+                    currentQuestionIdx++
+                    val nextPart = if (currentQuestionIdx in 0..2) 1 else if (currentQuestionIdx == 3) 2 else 3
+                    
+                    _uiState.value = SpeakingUiState.MockTestActive(
+                        engineState = ExaminerEngineState.EXAMINER_SPEAKING,
+                        promptText = response.next_question,
+                        currentPart = nextPart,
+                        currentQuestionIndex = currentQuestionIdx
+                    )
+                } else {
+                    // End of Part 3. Evaluate the entire combined transcripts and prompts!
+                    _uiState.value = SpeakingUiState.MockTestActive(
+                        engineState = ExaminerEngineState.ANALYZING,
+                        promptText = "Evaluating Speaking Performance...",
+                        currentPart = 3,
+                        currentQuestionIndex = currentQuestionIdx
+                    )
+
+                    val combinedTranscript = accumulatedTranscripts.joinToString("\n")
+                    val combinedPrompts = accumulatedPrompts.toList()
+
+                    viewModelScope.launch {
+                        val evalResult = geminiRepository.evaluateSpeaking(
+                            audioBytes = audioBytes,
+                            transcript = combinedTranscript,
+                            prompts = combinedPrompts
+                        )
+
+                        evalResult.onSuccess { evalResponse ->
+                            val finalResponse = evalResponse.copy(silenceTelemetry = telemetry)
+                            lastEvaluationResponse = finalResponse
+                            isFinalFeedback = true
+                            
+                            _uiState.value = SpeakingUiState.MockTestActive(
+                                engineState = ExaminerEngineState.EXAMINER_SPEAKING,
+                                promptText = finalResponse.overallFeedback,
+                                currentPart = 3,
+                                currentQuestionIndex = currentQuestionIdx
+                            )
+                        }.onFailure { error ->
+                            _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to evaluate speaking performance.")
+                        }
+                    }
+                }
             }.onFailure { error ->
-                _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to evaluate speaking performance.")
+                _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to get next question.")
             }
+        } catch (e: Exception) {
+            _uiState.value = SpeakingUiState.Error(e.message ?: "An error occurred during communication.")
         }
     }
 

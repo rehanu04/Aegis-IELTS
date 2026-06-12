@@ -401,8 +401,9 @@ private fun ActiveWritingHeader(
                 containerColor = AccentGreen,
                 disabledContainerColor = SurfaceSlateLight
             ),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             shape = RoundedCornerShape(8.dp),
-            modifier = Modifier.wrapContentWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+            modifier = Modifier.wrapContentSize()
         ) {
             Text(
                 text = "Submit Essay",

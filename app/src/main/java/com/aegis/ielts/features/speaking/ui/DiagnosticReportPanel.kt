@@ -28,6 +28,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -187,7 +188,7 @@ fun DiagnosticReportPanel(
             Spacer(Modifier.height(16.dp))
         }
 
-        // ── 2026 Advanced Structural Metrics ──────────────────────────────
+        // ── IELTS Qualitative Feedback Descriptors ────────────────────────
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors   = CardDefaults.cardColors(containerColor = SurfaceCard),
@@ -195,26 +196,20 @@ fun DiagnosticReportPanel(
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    text  = "STRUCTURAL METRICS (2026 OFFICIAL)",
+                    text  = "IELTS QUALITATIVE EVALUATION",
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted,
                     letterSpacing = 2.sp
                 )
                 Spacer(Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceAround
-                ) {
-                    val adv = report.advancedMetrics
-                    TelemetryPill(label = "FDI\n(Filler Index)", value = "%.1f".format(adv.fillerDensityIndex))
-                    TelemetryPill(label = "LAI\n(Lexical Asym)", value = "%.1f".format(adv.lexicalAsymmetryIndex))
-                    TelemetryPill(label = "Internal\nPauses", value = "${adv.withinClausePauses}")
-                    TelemetryPill(
-                        label = "Pre-memorized\nSpeech",
-                        value = if (adv.preMemorizedSpeechDetected) "FLAG" else "PASS",
-                        color = if (adv.preMemorizedSpeechDetected) AccentError else AccentGreen
-                    )
-                }
+                
+                QualitativeFeedbackRow(label = "Fluency", feedback = report.detailedFeedback.fluencyFeedback)
+                HorizontalDivider(color = SurfaceSlateLight, modifier = Modifier.padding(vertical = 8.dp))
+                QualitativeFeedbackRow(label = "Coherence", feedback = report.detailedFeedback.coherenceFeedback)
+                HorizontalDivider(color = SurfaceSlateLight, modifier = Modifier.padding(vertical = 8.dp))
+                QualitativeFeedbackRow(label = "Lexical Resource", feedback = report.detailedFeedback.lexicalFeedback)
+                HorizontalDivider(color = SurfaceSlateLight, modifier = Modifier.padding(vertical = 8.dp))
+                QualitativeFeedbackRow(label = "Grammatical Range", feedback = report.detailedFeedback.grammarFeedback)
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -374,6 +369,25 @@ private fun TelemetryPill(label: String, value: String, color: Color = SurfaceCy
             style     = MaterialTheme.typography.labelSmall,
             color     = TextMuted,
             textAlign = TextAlign.Center
+        )
+    }
+}
+
+@Composable
+private fun QualitativeFeedbackRow(label: String, feedback: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(
+            text = label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = SurfaceCyan,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = feedback,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextLight,
+            lineHeight = 20.sp
         )
     }
 }

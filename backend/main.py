@@ -1,10 +1,13 @@
 import os
+import io
 import math
 import logging
+import asyncio
+import base64
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, status, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from google import genai
 from google.genai import types
@@ -111,6 +114,7 @@ class PronunciationAssessmentMetric(BaseModel):
 
 class SpeakingAssessmentResponse(BaseModel):
     fluency_coherence: FluencyCoherenceMetric = Field(..., alias="fluencyCoherence")
+    coherence_feedback: str = Field(default="Ideas are logically structured with appropriate cohesive devices.", alias="coherenceFeedback")
     lexical_resource: LexicalAssessmentMetric = Field(..., alias="lexicalResource")
     grammatical_range_accuracy: GrammarAssessmentMetric = Field(..., alias="grammaticalRangeAccuracy")
     pronunciation: PronunciationAssessmentMetric = Field(..., alias="pronunciation")
@@ -324,6 +328,175 @@ class ListeningAudioRequest(BaseModel):
     accent_label: str = Field(..., description="Accent label")
 
 
+class SpeakingNextQuestionRequest(BaseModel):
+    audio_base64: Optional[str] = Field(default=None, description="Base64 encoded PCM/WAV audio bytes")
+    previous_transcript: Optional[str] = Field(default=None, description="Candidate STT transcript block")
+    current_question_index: int = Field(..., description="Index of the question just answered")
+    current_part: int = Field(..., description="Active IELTS Part (1, 2, or 3)")
+
+
+class SpeakingNextQuestionResponse(BaseModel):
+    transcript: str = Field(..., description="Candidate response transcript")
+    next_question: str = Field(..., description="Logical follow-up question or next topic")
+
+
+@app.get("/api/v1/listening/stream")
+async def listening_stream(
+    section_number: int,
+    accent: str,
+    environment_label: Optional[str] = None,
+    environment_description: Optional[str] = None,
+    is_pool_b: Optional[bool] = False
+):
+    logger.info(f"Streaming audio request: Section {section_number}, Accent {accent}, Pool B={is_pool_b}")
+    audio_bytes = None
+    
+    if client and os.getenv("GEMINI_API_KEY"):
+        env_label = environment_label or "Social Dialogue"
+        env_desc = environment_description or "General conversation"
+        
+        system_instruction = f"""
+        You are an IELTS Listening examiner.
+        Generate a continuous, realistic IELTS Listening monologue or dialogue script for Section {section_number} ({env_label}: {env_desc}).
+        The speaker must speak in a realistic {accent} accent.
+        Speak clearly and slowly, introducing the section context and reading a monologue/dialogue of about 150 words.
+        Do not output any text or markdown. Generate only the spoken audio.
+        """
+        
+        user_prompt = f"Please read the continuous {accent} narrative for Section {section_number}."
+        
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.7,
+                    response_modalities=["AUDIO"]
+                )
+            )
+            
+            if response.candidates and response.candidates[0].content.parts:
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data:
+                        audio_bytes = part.inline_data.data
+                        break
+        except Exception as e:
+            logger.error(f"Error generating streaming audio via Gemini: {e}")
+            
+    if not audio_bytes:
+        # Fallback to local preset file streaming
+        suffix = "_b" if is_pool_b else ""
+        filename = f"backend/audio/listening_sec{section_number}{suffix}.mp3"
+        if not os.path.exists(filename):
+            filename = f"backend/audio/listening_sec{section_number}.mp3"
+            
+        if os.path.exists(filename):
+            with open(filename, "rb") as f:
+                audio_bytes = f.read()
+        else:
+            logger.error(f"Local audio asset not found: {filename}")
+            raise HTTPException(status_code=404, detail="Audio resource not found")
+
+    # Paced streaming chunks generator (approx 50 KB/s)
+    async def paced_generator():
+        chunk_size = 4096
+        for i in range(0, len(audio_bytes), chunk_size):
+            yield audio_bytes[i:i+chunk_size]
+            await asyncio.sleep(0.08)
+            
+    headers = {"Content-Length": str(len(audio_bytes))}
+    return StreamingResponse(paced_generator(), media_type="audio/mpeg", headers=headers)
+
+
+@app.post("/api/v1/speaking/next-question", response_model=SpeakingNextQuestionResponse)
+async def speaking_next_question(request: SpeakingNextQuestionRequest):
+    logger.info(f"Speaking next-question request: Index {request.current_question_index}, Part {request.current_part}")
+    
+    transcript = request.previous_transcript or ""
+    if request.audio_base64 and not transcript:
+        try:
+            audio_bytes = base64.b64decode(request.audio_base64)
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
+            
+            if client and os.getenv("GEMINI_API_KEY"):
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[
+                        audio_part,
+                        "Transcribe the spoken words in this audio clearly. Do not add any extra text or comments. Just return the transcription."
+                    ]
+                )
+                transcript = response.text.strip() if response.text else ""
+            else:
+                transcript = ""
+        except Exception as e:
+            logger.error(f"Error transcribing audio: {e}")
+            transcript = ""
+
+    # Mock fallback for empty transcript
+    dummy_transcripts = [
+        "My name is John Doe. I am taking the IELTS test to study abroad.",
+        "I am from a small town in the countryside, and currently I am working as a junior software engineer.",
+        "In my free time, I really enjoy reading books and playing tennis with my friends.",
+        "I would like to describe the movie Inception. It had a strong influence on me because of its unique concept of dreams within dreams and how it explores sub-consciousness. I saw it a few years ago, and it really changed the way I think about storytelling.",
+        "In my opinion, movies have become much more visual-effects-driven now compared to the past when character development and storyline were more important.",
+        "I think films should primarily entertain, but having some educational or thought-provoking value makes them much more memorable and impactful.",
+        "Local films often have very limited budgets and tackle cultural themes that might not translate well to global audiences compared to big budget productions."
+    ]
+    if not transcript:
+        if request.current_question_index < len(dummy_transcripts):
+            transcript = dummy_transcripts[request.current_question_index]
+        else:
+            transcript = "Yes, I agree with that point."
+
+    part1_questions = [
+        "Welcome to the IELTS speaking test. Can you tell me your full name, please?",
+        "Where are you from, and do you work or study?",
+        "Let's talk about your free time. What hobbies do you enjoy the most?"
+    ]
+    part2_question = "Describe a book or a movie that had a strong influence on you. You should say what it is, when you saw/read it, and explain why it influenced you."
+    part3_questions = [
+        "In your opinion, how has the type of movies people watch changed over the past few decades?",
+        "Do you think films should always have educational value, or is entertainment enough?",
+        "Why do you think some local films fail to attract a global audience compared to big budget productions?"
+    ]
+    all_questions = part1_questions + [part2_question] + part3_questions
+    
+    next_question = ""
+    if client and os.getenv("GEMINI_API_KEY"):
+        system_instruction = f"""
+        You are a certified IELTS Speaking examiner.
+        Based on the candidate's last answer, you must generate a logical follow-up question or the next IELTS topic question.
+        The candidate said: "{transcript}"
+        
+        If this was Part 1 (current_part=1) or Part 3 (current_part=3), and the candidate gave a substantive response, ask a logical follow-up question related to this content before moving to the next IELTS topic:
+        "The candidate said [Transcript]. Ask a logical follow-up question related to this content before moving to the next IELTS topic."
+        
+        If this is Part 2 (current_part=2), ask the standard Cue Card follow-up.
+        If the candidate's response was extremely short or silent, ask the next standard IELTS question.
+        """
+        user_prompt = f"Generate the next examiner question. Current index: {request.current_question_index}, Part: {request.current_part}."
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.7
+                )
+            )
+            next_question = response.text.strip() if response.text else ""
+        except Exception as e:
+            logger.error(f"Error generating follow-up: {e}")
+            
+    if not next_question:
+        next_idx = (request.current_question_index + 1) % len(all_questions)
+        next_question = all_questions[next_idx]
+
+    return SpeakingNextQuestionResponse(transcript=transcript, next_question=next_question)
+
+
 @app.post("/api/v1/generate-listening-audio")
 async def generate_listening_audio(request: ListeningAudioRequest):
     logger.info(f"Generating listening audio for Section {request.section_number} ({request.accent_label})")
@@ -500,6 +673,7 @@ def local_speaking_assessment(transcript: str) -> SpeakingAssessmentResponse:
             ),
             fillerDensityIndex=filler_density
         ),
+        coherenceFeedback="Candidate presents points in a structured format with clear transitions.",
         lexicalResource=LexicalAssessmentMetric(
             score=lexical,
             feedback="Vocabulary is sufficient to discuss general topics, with some repetitive lexical choices.",

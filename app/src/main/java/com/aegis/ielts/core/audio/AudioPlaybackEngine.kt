@@ -104,22 +104,6 @@ class AudioPlaybackEngine @Inject constructor(
         _playbackState.value = PlaybackState.Loading
     }
 
-    /**
-     * Plays an audio file bundled in the app's assets directory.
-     *
-     * @param assetPath  Relative path within assets/, e.g. "audio/part1_intro.mp3"
-     */
-    suspend fun playFromAsset(assetPath: String) {
-        val cleanPath = assetPath.replace("asset:///", "").replace("file:///android_asset/", "")
-        
-        // Verified AssetFileDescriptor check
-        withContext(Dispatchers.IO) {
-            context.assets.openFd(cleanPath).close()
-        }
-        
-        playFromUri(Uri.parse("asset:///$cleanPath"))
-    }
-
     /** Stops playback and resets state to Idle. */
     suspend fun stop() = withContext(Dispatchers.Main) {
         player?.stop()
@@ -129,6 +113,9 @@ class AudioPlaybackEngine @Inject constructor(
 
     /** Exposes the exact position of the active audio stream. */
     fun getCurrentPosition(): Long = player?.currentPosition ?: 0L
+
+    /** Exposes the buffered position of the active audio stream. */
+    fun getBufferedPosition(): Long = player?.bufferedPosition ?: 0L
 
     /** Exposes the exact duration of the active audio stream. */
     fun getDuration(): Long = player?.duration ?: 0L

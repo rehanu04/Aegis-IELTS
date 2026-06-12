@@ -41,6 +41,7 @@ fun ListeningAssessmentScreen(
     val answers by viewModel.answers.collectAsStateWithLifecycle()
     val inputErrors by viewModel.inputErrors.collectAsStateWithLifecycle()
     val playbackProgress by viewModel.audioPlaybackProgress.collectAsStateWithLifecycle()
+    val bufferProgress by viewModel.audioBufferProgress.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -69,6 +70,7 @@ fun ListeningAssessmentScreen(
                         answers = answers,
                         inputErrors = inputErrors,
                         playbackProgress = playbackProgress,
+                        bufferProgress = bufferProgress,
                         onNavigateBack = { viewModel.resetToIdle() },
                         onSaveAnswer = { qId, ans -> viewModel.saveAnswer(qId, ans) },
                         onSubmitTest = { viewModel.submitListeningTest() },
@@ -295,6 +297,7 @@ private fun ListeningActiveContent(
     answers: Map<String, String>,
     inputErrors: Map<String, String?>,
     playbackProgress: Float,
+    bufferProgress: Float,
     onNavigateBack: () -> Unit,
     onSaveAnswer: (String, String) -> Unit,
     onSubmitTest: () -> Unit,
@@ -307,9 +310,7 @@ private fun ListeningActiveContent(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = 88.dp) // Leave space for persistent control bar
+            modifier = Modifier.fillMaxSize()
         ) {
             // Active Header Bar
             Row(
@@ -352,10 +353,95 @@ private fun ListeningActiveContent(
                 }
             }
 
+            // Sticky-pinned Top Audio Controller Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(88.dp)
+                    .background(SurfaceSlate)
+                    .border(width = 1.dp, color = SurfaceSlateLight)
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Play Button
+                    Button(
+                        onClick = onStartSectionAudio,
+                        enabled = !state.isAudioStarted && !state.isFrozen,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (state.isAudioStarted) SurfaceSlateLight else AccentGreen,
+                            disabledContainerColor = SurfaceSlateLight
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .width(140.dp)
+                            .height(48.dp)
+                    ) {
+                        val icon = if (state.isAudioStarted && state.isAudioPlaying) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.PlayArrow
+                        val text = if (state.isAudioStarted) {
+                            if (state.isAudioPlaying) "Playing..." else "Completed"
+                        } else {
+                            "Play Audio"
+                        }
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = if (state.isAudioStarted) TextMuted else SurfaceSlate,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = text,
+                            color = if (state.isAudioStarted) TextMuted else SurfaceSlate,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    // Progress Indicator Line & metrics domain mapping
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Exam Timeline Progress",
+                                color = TextMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "${(playbackProgress * 100).toInt()}%",
+                                color = SurfaceCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        CanvasIsolatedProgressBar(
+                            progress = playbackProgress,
+                            bufferProgress = bufferProgress,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                        )
+                    }
+                }
+            }
+
             // Single, continuous vertically scrollable LazyColumn question pool
             LazyColumn(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .weight(1f)
                     .padding(horizontal = 20.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -375,7 +461,7 @@ private fun ListeningActiveContent(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "You may preview all questions below before starting the audio playback. Once ready, click 'Play Audio' in the bottom controller bar to start the listening track. Answers must be completed as you listen.",
+                                text = "You may preview all questions below before starting the audio playback. Once ready, click 'Play Audio' in the top controller bar to start the listening track. Answers must be completed as you listen.",
                                 color = TextMuted,
                                 fontSize = 12.sp,
                                 lineHeight = 18.sp
@@ -399,99 +485,16 @@ private fun ListeningActiveContent(
                 }
             }
         }
-
-        // Persistent Anchored Bottom Audio Controller Bar
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(88.dp)
-                .background(SurfaceSlate)
-                .border(width = 1.dp, color = SurfaceSlateLight)
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                // Play Button
-                Button(
-                    onClick = onStartSectionAudio,
-                    enabled = !state.isAudioStarted && !state.isFrozen,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (state.isAudioStarted) SurfaceSlateLight else AccentGreen,
-                        disabledContainerColor = SurfaceSlateLight
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .width(140.dp)
-                        .height(48.dp)
-                ) {
-                    val icon = if (state.isAudioStarted && state.isAudioPlaying) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.PlayArrow
-                    val text = if (state.isAudioStarted) {
-                        if (state.isAudioPlaying) "Playing..." else "Completed"
-                    } else {
-                        "Play Audio"
-                    }
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = if (state.isAudioStarted) TextMuted else SurfaceSlate,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = text,
-                        color = if (state.isAudioStarted) TextMuted else SurfaceSlate,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp
-                    )
-                }
-
-                // Progress Indicator Line & metrics domain mapping
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Exam Timeline Progress",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "${(playbackProgress * 100).toInt()}%",
-                            color = SurfaceCyan,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    CanvasIsolatedProgressBar(
-                        progress = playbackProgress,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                    )
-                }
-            }
-        }
     }
 }
 
 /**
- * Isolated progress bar using Canvas to render values exactly.
+ * Isolated progress bar using Canvas to render values exactly with buffer overlay.
  */
 @Composable
 private fun CanvasIsolatedProgressBar(
     progress: Float,
+    bufferProgress: Float,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
@@ -503,6 +506,15 @@ private fun CanvasIsolatedProgressBar(
             color = SurfaceSlateLight,
             size = size
         )
+
+        // Buffer path (bytes received)
+        if (bufferProgress > 0f) {
+            val bufferWidth = width * bufferProgress.coerceIn(0f, 1f)
+            drawRect(
+                color = SurfaceCyan.copy(alpha = 0.3f),
+                size = androidx.compose.ui.geometry.Size(bufferWidth, height)
+            )
+        }
 
         // Progress path
         if (progress > 0f) {

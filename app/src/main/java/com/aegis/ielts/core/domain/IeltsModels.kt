@@ -121,6 +121,7 @@ data class PronunciationAssessmentMetric(
 @Serializable
 data class SpeakingDetailedFeedback(
     val fluencyFeedback      : String,
+    val coherenceFeedback    : String,
     val lexicalFeedback      : String,
     val grammarFeedback      : String,
     val pronunciationFeedback: String
@@ -145,6 +146,7 @@ data class AdvancedSpeakingMetrics(
 @Serializable
 data class SpeakingAssessmentResponse(
     val fluencyCoherence: FluencyCoherenceMetric,
+    val coherenceFeedback: String = "Ideas are logically structured with appropriate cohesive devices.",
     val lexicalResource: LexicalAssessmentMetric,
     val grammaticalRangeAccuracy: GrammarAssessmentMetric,
     val pronunciation: PronunciationAssessmentMetric,
@@ -160,6 +162,7 @@ data class SpeakingAssessmentResponse(
     val detailedFeedback: SpeakingDetailedFeedback
         get() = SpeakingDetailedFeedback(
             fluencyFeedback = fluencyCoherence.feedback,
+            coherenceFeedback = coherenceFeedback,
             lexicalFeedback = lexicalResource.feedback,
             grammarFeedback = grammaticalRangeAccuracy.feedback,
             pronunciationFeedback = pronunciation.feedback
@@ -258,3 +261,17 @@ data class WritingAssessmentResponse(
         overallFeedback = feedback
     )
 }
+
+@Serializable
+data class SpeakingNextQuestionRequest(
+    val audio_base64: String?,
+    val previous_transcript: String?,
+    val current_question_index: Int,
+    val current_part: Int
+)
+
+@Serializable
+data class SpeakingNextQuestionResponse(
+    val transcript: String,
+    val next_question: String
+)
