@@ -337,20 +337,6 @@ private fun ListeningActiveContent(
                         fontWeight = FontWeight.Bold
                     )
                 }
-
-                Button(
-                    onClick = onSubmitTest,
-                    enabled = !state.isFrozen,
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = "Submit Exam",
-                        color = SurfaceSlate,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                }
             }
 
             // Sticky-pinned Top Audio Controller Bar
@@ -482,6 +468,26 @@ private fun ListeningActiveContent(
                         isFrozen = state.isFrozen,
                         onSaveAnswer = onSaveAnswer
                     )
+                }
+
+                item {
+                    Button(
+                        onClick = onSubmitTest,
+                        enabled = !state.isFrozen,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .height(56.dp)
+                    ) {
+                        Text(
+                            text = "Submit Exam",
+                            color = SurfaceSlate,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
                 }
             }
         }

@@ -293,7 +293,7 @@ class ListeningViewModel @Inject constructor(
                         "&environment_label=${java.net.URLEncoder.encode(section.environment.label, "UTF-8")}" +
                         "&environment_description=${java.net.URLEncoder.encode(section.environment.description, "UTF-8")}" +
                         "&is_pool_b=$isPoolB"
-                audioPlaybackEngine.playFromUri(Uri.parse(streamUrl))
+                audioPlaybackEngine.playFromUri(Uri.parse(streamUrl), fallbackAssetPath = section.audioAssetPath)
             } catch (e: Exception) {
                 _uiState.value = ListeningUiState.Error("Network error: Failed to connect to streaming audio endpoint.")
             }

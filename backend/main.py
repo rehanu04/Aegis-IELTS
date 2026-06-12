@@ -380,6 +380,7 @@ async def listening_stream(
                 for part in response.candidates[0].content.parts:
                     if part.inline_data:
                         audio_bytes = part.inline_data.data
+                        media_type_header = "audio/wav"
                         break
         except Exception as e:
             logger.error(f"Error generating streaming audio via Gemini: {e}")
@@ -394,6 +395,7 @@ async def listening_stream(
         if os.path.exists(filename):
             with open(filename, "rb") as f:
                 audio_bytes = f.read()
+            media_type_header = "audio/mpeg"
         else:
             logger.error(f"Local audio asset not found: {filename}")
             raise HTTPException(status_code=404, detail="Audio resource not found")
@@ -406,7 +408,7 @@ async def listening_stream(
             await asyncio.sleep(0.08)
             
     headers = {"Content-Length": str(len(audio_bytes))}
-    return StreamingResponse(paced_generator(), media_type="audio/mpeg", headers=headers)
+    return StreamingResponse(paced_generator(), media_type=media_type_header, headers=headers)
 
 
 @app.post("/api/v1/speaking/next-question", response_model=SpeakingNextQuestionResponse)
@@ -466,15 +468,13 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     next_question = ""
     if client and os.getenv("GEMINI_API_KEY"):
         system_instruction = f"""
-        You are a certified IELTS Speaking examiner.
-        Based on the candidate's last answer, you must generate a logical follow-up question or the next IELTS topic question.
+        You are a certified IELTS Speaking examiner. Act like a real human examiner—respond dynamically or ask a direct contextual follow-up question based specifically on what the candidate just said.
         The candidate said: "{transcript}"
         
-        If this was Part 1 (current_part=1) or Part 3 (current_part=3), and the candidate gave a substantive response, ask a logical follow-up question related to this content before moving to the next IELTS topic:
-        "The candidate said [Transcript]. Ask a logical follow-up question related to this content before moving to the next IELTS topic."
+        If this was Part 1 (current_part=1) or Part 3 (current_part=3), and the candidate gave a substantive response, acknowledge their answer naturally and ask a logical follow-up question closely related to their specific points before moving to the next official IELTS topic.
         
         If this is Part 2 (current_part=2), ask the standard Cue Card follow-up.
-        If the candidate's response was extremely short or silent, ask the next standard IELTS question.
+        If the candidate's response was extremely short or silent, gently prompt them to elaborate or ask the next standard IELTS question.
         """
         user_prompt = f"Generate the next examiner question. Current index: {request.current_question_index}, Part: {request.current_part}."
         try:
