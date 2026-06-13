@@ -35,8 +35,4 @@ sealed class ListeningUiState {
         val report: ListeningGradingReport
     ) : ListeningUiState()
 
-    /**
-     * Error state.
-     */
-    data class Error(val message: String) : ListeningUiState()
 }

@@ -86,12 +86,6 @@ fun ListeningAssessmentScreen(
                         onNavigateBack = onNavigateBack
                     )
                 }
-                is ListeningUiState.Error -> {
-                    ListeningErrorContent(
-                        message = state.message,
-                        onRetry = { viewModel.resetToIdle() }
-                    )
-                }
             }
         }
     }
@@ -1254,50 +1248,5 @@ private fun getCorrectAnswer(qId: String): String {
         "q4_form_1" -> "TITANIUM"
         "q4_form_2" -> "1500"
         else -> ""
-    }
-}
-
-// ─── Error Screen ─────────────────────────────────────────────────────────────
-
-@Composable
-private fun ListeningErrorContent(
-    message: String,
-    onRetry: () -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = Icons.Default.Error,
-            contentDescription = "Error",
-            tint = AccentError,
-            modifier = Modifier.size(64.dp)
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Something went wrong",
-            color = TextLight,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = message,
-            color = TextMuted,
-            style = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(
-            onClick = onRetry,
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceCyan),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text("Try Again", color = SurfaceSlate, fontWeight = FontWeight.Bold)
-        }
     }
 }

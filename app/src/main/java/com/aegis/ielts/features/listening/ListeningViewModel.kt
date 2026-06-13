@@ -24,7 +24,6 @@ import com.aegis.ielts.core.network.GeminiRepository
 
 @HiltViewModel
 class ListeningViewModel @Inject constructor(
-    private val audioPlaybackEngine: AudioPlaybackEngine,
     private val geminiRepository: GeminiRepository,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -34,10 +33,25 @@ class ListeningViewModel @Inject constructor(
     init {
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // initialized
+                tts?.language = java.util.Locale.UK
             }
         }
     }
+
+    private val listeningScript = """
+        Welcome to the Aegis campus. I'm the student receptionist. Let's get your registration sorted. 
+        First, I have your family name listed as HEMINGWAY. Is that correct?
+        And your contact number, we have it as 07700900077.
+        Regarding the nature reserve trip next week, be aware there are major traffic delays expected. 
+        It's not wildlife crossings or seasonal flooding as usual, but rather bridge construction on the main road.
+        The reserve café is quite popular. It's open to the public on weekends only.
+        Now, let me help you with the campus map. The Student Help Center Office is located at building B, right next to the east gate.
+        And the Main Lecture Hall Complex is building C, in the center of the campus.
+        For your history of architecture elective, you'll study different designs. For example, the Gothic Arches System falls under the MEDIEVAL period, while the Steel Beam Foundations are distinctly MODERN.
+        Oh, and a quick update on the library. The new opening hour on Sundays is 10:00 AM. 
+        If you need to return books after hours, the Book Return Box location is right at the ENTRANCE.
+        That covers everything. Good luck with your studies!
+    """.trimIndent()
 
     // ─── UI State ─────────────────────────────────────────────────────────────
     private val _uiState = MutableStateFlow<ListeningUiState>(ListeningUiState.Idle)
@@ -188,72 +202,39 @@ class ListeningViewModel @Inject constructor(
         playbackStateJob?.cancel()
         progressTickerJob?.cancel()
 
-        viewModelScope.launch {
-            try {
-                audioPlaybackEngine.playFromAsset(section.audioAssetPath)
-            } catch (e: Exception) {
-                _uiState.value = ListeningUiState.Error("Failed to load local audio asset.")
-            }
-        }
-
-        // Track ExoPlayer playback status
-        playbackStateJob = viewModelScope.launch {
-            audioPlaybackEngine.playbackState.collect { state ->
-                when (state) {
-                    is PlaybackState.Playing -> {
-                        updateActiveAudioPlayingState(true)
-                        startProgressIndicatorTicker()
-                    }
-                    is PlaybackState.Completed -> {
-                        updateActiveAudioPlayingState(false)
-                        // Do not cancel the ticker here; the countdown must continue!
-                    }
-                    is PlaybackState.Error -> {
-                        updateActiveAudioPlayingState(false)
-                        progressTickerJob?.cancel()
-                        _uiState.value = ListeningUiState.Error(state.message)
-                    }
-                    is PlaybackState.Loading, PlaybackState.Idle -> {
-                        progressTickerJob?.cancel()
-                    }
-                }
-            }
-        }
+        _uiState.value = (_uiState.value as ListeningUiState.Active).copy(isAudioPlaying = true)
+        
+        tts?.speak(listeningScript, TextToSpeech.QUEUE_FLUSH, null, "TTS_ID")
+        
+        startProgressIndicatorTicker()
     }
 
     private fun startProgressIndicatorTicker() {
         progressTickerJob?.cancel()
+        
+        val totalDurationSeconds = 150L // Approx script duration + 60s
+        _countdownSeconds.value = totalDurationSeconds
+
         progressTickerJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            var elapsed = 0L
             while (true) {
                 val currentState = _uiState.value as? ListeningUiState.Active ?: break
                 if (currentState.isFrozen) break
 
-                val duration = audioPlaybackEngine.getDuration()
-                val position = audioPlaybackEngine.getCurrentPosition()
-                val buffered = audioPlaybackEngine.getBufferedPosition()
-
-                if (duration > 0) {
-                    _audioPlaybackProgress.value = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-                    _audioBufferProgress.value = (buffered.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-
-                    // Initialize countdown dynamically upon reading file duration
-                    if (countdownEndTimeMs == null) {
-                        countdownEndTimeMs = System.currentTimeMillis() + duration + 120_000L // Duration + 120 seconds
-                    }
+                val currentCountdown = _countdownSeconds.value ?: break
+                if (currentCountdown > 0) {
+                    _countdownSeconds.value = currentCountdown - 1
+                    elapsed++
+                    
+                    _audioPlaybackProgress.value = (elapsed.toFloat() / totalDurationSeconds.toFloat()).coerceIn(0f, 1f)
+                    _audioBufferProgress.value = _audioPlaybackProgress.value
+                } else {
+                    _countdownSeconds.value = 0
+                    submitListeningTest() // Freeze everything exactly at 0.00s
+                    break
                 }
 
-                if (countdownEndTimeMs != null) {
-                    val remainingMs = countdownEndTimeMs!! - System.currentTimeMillis()
-                    if (remainingMs > 0) {
-                        _countdownSeconds.value = remainingMs / 1000
-                    } else {
-                        _countdownSeconds.value = 0
-                        submitListeningTest() // Freeze everything exactly at 0.00s
-                        break
-                    }
-                }
-
-                delay(200)
+                delay(1000L)
             }
         }
     }
@@ -327,9 +308,7 @@ class ListeningViewModel @Inject constructor(
         val currentState = _uiState.value as? ListeningUiState.Active ?: return
         if (currentState.isFrozen) return
 
-        viewModelScope.launch {
-            audioPlaybackEngine.stop()
-        }
+        tts?.stop()
 
         // Freeze interactive nodes
         _uiState.value = currentState.copy(isFrozen = true)
@@ -378,9 +357,7 @@ class ListeningViewModel @Inject constructor(
      * Resets the screen to Idle state.
      */
     fun resetToIdle() {
-        viewModelScope.launch {
-            audioPlaybackEngine.stop()
-        }
+        tts?.stop()
         playbackStateJob?.cancel()
         progressTickerJob?.cancel()
         _answers.value = emptyMap()
@@ -394,7 +371,7 @@ class ListeningViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        audioPlaybackEngine.release()
+
         playbackStateJob?.cancel()
         progressTickerJob?.cancel()
         tts?.stop()
