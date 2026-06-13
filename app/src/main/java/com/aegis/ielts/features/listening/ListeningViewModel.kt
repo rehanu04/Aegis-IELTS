@@ -58,8 +58,12 @@ class ListeningViewModel @Inject constructor(
     private val _audioBufferProgress = MutableStateFlow(0f)
     val audioBufferProgress: StateFlow<Float> = _audioBufferProgress.asStateFlow()
 
+    private val _countdownSeconds = MutableStateFlow<Long?>(null)
+    val countdownSeconds: StateFlow<Long?> = _countdownSeconds.asStateFlow()
+
     private var playbackStateJob: Job? = null
     private var progressTickerJob: Job? = null
+    private var countdownEndTimeMs: Long? = null
 
     // ─── Actions ──────────────────────────────────────────────────────────────
     
@@ -70,192 +74,92 @@ class ListeningViewModel @Inject constructor(
      * Samples accents according to probabilities and shuffles sections (Unpredictable Task Router).
      */
     fun startListeningAssessment() {
-        val selectedAccents = List(4) { selectAccentByWeights() }
-
-        // Pool A questions
-        val poolA = listOf(
-            ListeningSection(
-                sectionNumber = 1,
-                environment = ListeningEnvironment.SOCIAL_DIALOGUE,
-                accent = selectedAccents[0],
-                questions = listOf(
-                    ListeningQuestion.FormCompletion(
-                        id = "q1_form_name",
-                        instruction = "Write ONE WORD ONLY for each answer.",
-                        questionText = "Family Name",
-                        correctAnswer = "HEMINGWAY"
-                    ),
-                    ListeningQuestion.FormCompletion(
-                        id = "q1_form_phone",
-                        instruction = "Write NUMBERS ONLY for each answer.",
-                        questionText = "Contact Number",
-                        correctAnswer = "07700900077",
-                        charLimit = 11
-                    )
+        // Pool A questions (unified mock track)
+        val unifiedSection = ListeningSection(
+            sectionNumber = 1,
+            environment = ListeningEnvironment.SOCIAL_DIALOGUE,
+            accent = Accent.STANDARD,
+            questions = listOf(
+                ListeningQuestion.FormCompletion(
+                    id = "q1_form_name",
+                    instruction = "Write ONE WORD ONLY for each answer.",
+                    questionText = "Family Name",
+                    correctAnswer = "HEMINGWAY"
                 ),
-                audioAssetPath = "audio/listening_sec1.mp3"
+                ListeningQuestion.FormCompletion(
+                    id = "q1_form_phone",
+                    instruction = "Write NUMBERS ONLY for each answer.",
+                    questionText = "Contact Number",
+                    correctAnswer = "07700900077",
+                    charLimit = 11
+                ),
+                ListeningQuestion.MultipleChoice(
+                    id = "q2_mcq_1",
+                    instruction = "Choose the correct letter, A, B or C.",
+                    questionText = "What is the primary cause of traffic delays in the nature reserve?",
+                    options = listOf("A. Wildlife crossings", "B. Bridge construction", "C. Seasonal flooding"),
+                    correctAnswer = "B"
+                ),
+                ListeningQuestion.MultipleChoice(
+                    id = "q2_mcq_2",
+                    instruction = "Choose the correct letter, A, B or C.",
+                    questionText = "When is the reserve café open to the public?",
+                    options = listOf("A. On weekends only", "B. Throughout the year", "C. During summer months"),
+                    correctAnswer = "A"
+                ),
+                ListeningQuestion.MapLabeling(
+                    id = "q3_map_1",
+                    instruction = "Write the correct letter, A-E, next to the location description.",
+                    questionText = "Student Help Center Office",
+                    correctAnswer = "B"
+                ),
+                ListeningQuestion.MapLabeling(
+                    id = "q3_map_2",
+                    instruction = "Write the correct letter, A-E, next to the location description.",
+                    questionText = "Main Lecture Hall Complex",
+                    correctAnswer = "C"
+                ),
+                ListeningQuestion.Matching(
+                    id = "q4_match_1",
+                    instruction = "Classify the architectural designs under correct historical periods.",
+                    questionText = "Gothic Arches System",
+                    categories = listOf("MEDIEVAL", "RENAISSANCE", "MODERN"),
+                    correctAnswer = "MEDIEVAL"
+                ),
+                ListeningQuestion.Matching(
+                    id = "q4_match_2",
+                    instruction = "Classify the architectural designs under correct historical periods.",
+                    questionText = "Steel Beam Foundations",
+                    categories = listOf("MEDIEVAL", "RENAISSANCE", "MODERN"),
+                    correctAnswer = "MODERN"
+                ),
+                // Added two more questions to make it 10 total
+                ListeningQuestion.MultipleChoice(
+                    id = "q5_mcq_1",
+                    instruction = "Choose the correct letter, A, B or C.",
+                    questionText = "What is the new library opening hour on Sundays?",
+                    options = listOf("A. 9:00 AM", "B. 10:00 AM", "C. 12:00 PM"),
+                    correctAnswer = "B"
+                ),
+                ListeningQuestion.FormCompletion(
+                    id = "q5_form_1",
+                    instruction = "Write ONE WORD ONLY for each answer.",
+                    questionText = "Book Return Box Location",
+                    correctAnswer = "ENTRANCE"
+                )
             ),
-            ListeningSection(
-                sectionNumber = 2,
-                environment = ListeningEnvironment.SOCIAL_MONOLOGUE,
-                accent = selectedAccents[1],
-                questions = listOf(
-                    ListeningQuestion.MultipleChoice(
-                        id = "q2_mcq_1",
-                        instruction = "Choose the correct letter, A, B or C.",
-                        questionText = "What is the primary cause of traffic delays in the nature reserve?",
-                        options = listOf("A. Wildlife crossings", "B. Bridge construction", "C. Seasonal flooding"),
-                        correctAnswer = "B"
-                    ),
-                    ListeningQuestion.MultipleChoice(
-                        id = "q2_mcq_2",
-                        instruction = "Choose the correct letter, A, B or C.",
-                        questionText = "When is the reserve café open to the public?",
-                        options = listOf("A. On weekends only", "B. Throughout the year", "C. During summer months"),
-                        correctAnswer = "A"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec2.mp3"
-            ),
-            ListeningSection(
-                sectionNumber = 3,
-                environment = ListeningEnvironment.ACADEMIC_DISCUSSION,
-                accent = selectedAccents[2],
-                questions = listOf(
-                    ListeningQuestion.MapLabeling(
-                        id = "q3_map_1",
-                        instruction = "Write the correct letter, A-E, next to the location description.",
-                        questionText = "Student Help Center Office",
-                        correctAnswer = "B"
-                    ),
-                    ListeningQuestion.MapLabeling(
-                        id = "q3_map_2",
-                        instruction = "Write the correct letter, A-E, next to the location description.",
-                        questionText = "Main Lecture Hall Complex",
-                        correctAnswer = "C"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec3.mp3"
-            ),
-            ListeningSection(
-                sectionNumber = 4,
-                environment = ListeningEnvironment.ACADEMIC_LECTURE,
-                accent = selectedAccents[3],
-                questions = listOf(
-                    ListeningQuestion.Matching(
-                        id = "q4_match_1",
-                        instruction = "Classify the architectural designs under correct historical periods.",
-                        questionText = "Gothic Arches System",
-                        categories = listOf("MEDIEVAL", "RENAISSANCE", "MODERN"),
-                        correctAnswer = "MEDIEVAL"
-                    ),
-                    ListeningQuestion.Matching(
-                        id = "q4_match_2",
-                        instruction = "Classify the architectural designs under correct historical periods.",
-                        questionText = "Steel Beam Foundations",
-                        categories = listOf("MEDIEVAL", "RENAISSANCE", "MODERN"),
-                        correctAnswer = "MODERN"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec4.mp3"
-            )
+            audioAssetPath = "audio/section_1.mp3"
         )
 
-        // Pool B questions (reversed or completely shuffled layouts for unpredictable routing)
-        val poolB = listOf(
-            ListeningSection(
-                sectionNumber = 1,
-                environment = ListeningEnvironment.SOCIAL_DIALOGUE,
-                accent = selectedAccents[0],
-                questions = listOf(
-                    ListeningQuestion.MultipleChoice(
-                        id = "q1_mcq_1",
-                        instruction = "Choose the correct letter, A, B or C.",
-                        questionText = "Where will the conference delegates meet on the first morning?",
-                        options = listOf("A. In the Main Lobby", "B. In the Conference Room C", "C. In the Student Lounge"),
-                        correctAnswer = "A"
-                    ),
-                    ListeningQuestion.MultipleChoice(
-                        id = "q1_mcq_2",
-                        instruction = "Choose the correct letter, A, B or C.",
-                        questionText = "How much is the registration fee for student delegates?",
-                        options = listOf("A. £45.00", "B. £60.00", "C. £75.00"),
-                        correctAnswer = "B"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec1_b.mp3"
-            ),
-            ListeningSection(
-                sectionNumber = 2,
-                environment = ListeningEnvironment.SOCIAL_MONOLOGUE,
-                accent = selectedAccents[1],
-                questions = listOf(
-                    ListeningQuestion.MapLabeling(
-                        id = "q2_map_1",
-                        instruction = "Write the correct letter, A-E, next to the reserve landmark.",
-                        questionText = "Bird Watching Tower",
-                        correctAnswer = "C"
-                    ),
-                    ListeningQuestion.MapLabeling(
-                        id = "q2_map_2",
-                        instruction = "Write the correct letter, A-E, next to the reserve landmark.",
-                        questionText = "Picnic Area Zone",
-                        correctAnswer = "E"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec2_b.mp3"
-            ),
-            ListeningSection(
-                sectionNumber = 3,
-                environment = ListeningEnvironment.ACADEMIC_DISCUSSION,
-                accent = selectedAccents[2],
-                questions = listOf(
-                    ListeningQuestion.Matching(
-                        id = "q3_match_1",
-                        instruction = "Match the seminar courses with their eligibility criteria.",
-                        questionText = "Advanced Machine Learning",
-                        categories = listOf("GRADUATES_ONLY", "OPEN_TO_ALL", "PREREQUISITES_REQUIRED"),
-                        correctAnswer = "PREREQUISITES_REQUIRED"
-                    ),
-                    ListeningQuestion.Matching(
-                        id = "q3_match_2",
-                        instruction = "Match the seminar courses with their eligibility criteria.",
-                        questionText = "Introduction to Statistics",
-                        categories = listOf("GRADUATES_ONLY", "OPEN_TO_ALL", "PREREQUISITES_REQUIRED"),
-                        correctAnswer = "OPEN_TO_ALL"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec3_b.mp3"
-            ),
-            ListeningSection(
-                sectionNumber = 4,
-                environment = ListeningEnvironment.ACADEMIC_LECTURE,
-                accent = selectedAccents[3],
-                questions = listOf(
-                    ListeningQuestion.FormCompletion(
-                        id = "q4_form_1",
-                        instruction = "Write ONE WORD ONLY for each answer.",
-                        questionText = "Material used for shield construction",
-                        correctAnswer = "TITANIUM"
-                    ),
-                    ListeningQuestion.FormCompletion(
-                        id = "q4_form_2",
-                        instruction = "Write ONE WORD AND/OR A NUMBER for each answer.",
-                        questionText = "Maximum operational temperature (Celsius)",
-                        correctAnswer = "1500"
-                    )
-                ),
-                audioAssetPath = "audio/listening_sec4_b.mp3"
-            )
-        )
-
-        // Randomly route either Pool A or Pool B to prevent memorization
-        val activeSections = if (Random.nextBoolean()) poolA else poolB
+        val activeSections = listOf(unifiedSection)
 
         // Clear state
         _answers.value = activeSections.flatMap { it.questions }.associate { it.id to "" }
         _inputErrors.value = emptyMap()
         _audioPlaybackProgress.value = 0f
+        _audioBufferProgress.value = 0f
+        _countdownSeconds.value = null
+        countdownEndTimeMs = null
 
         _uiState.value = ListeningUiState.Active(
             sections = activeSections,
@@ -286,16 +190,9 @@ class ListeningViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val isPoolB = section.audioAssetPath.contains("_b")
-                val streamUrl = "${com.aegis.ielts.core.network.GeminiApiClient.BACKEND_URL}/api/v1/listening/stream" +
-                        "?section_number=${section.sectionNumber}" +
-                        "&accent=${java.net.URLEncoder.encode(section.accent.label, "UTF-8")}" +
-                        "&environment_label=${java.net.URLEncoder.encode(section.environment.label, "UTF-8")}" +
-                        "&environment_description=${java.net.URLEncoder.encode(section.environment.description, "UTF-8")}" +
-                        "&is_pool_b=$isPoolB"
-                audioPlaybackEngine.playFromUri(Uri.parse(streamUrl), fallbackAssetPath = section.audioAssetPath)
+                audioPlaybackEngine.playFromAsset(section.audioAssetPath)
             } catch (e: Exception) {
-                _uiState.value = ListeningUiState.Error("Network error: Failed to connect to streaming audio endpoint.")
+                _uiState.value = ListeningUiState.Error("Failed to load local audio asset.")
             }
         }
 
@@ -309,8 +206,7 @@ class ListeningViewModel @Inject constructor(
                     }
                     is PlaybackState.Completed -> {
                         updateActiveAudioPlayingState(false)
-                        progressTickerJob?.cancel()
-                        advanceToNextSection()
+                        // Do not cancel the ticker here; the countdown must continue!
                     }
                     is PlaybackState.Error -> {
                         updateActiveAudioPlayingState(false)
@@ -329,21 +225,34 @@ class ListeningViewModel @Inject constructor(
         progressTickerJob?.cancel()
         progressTickerJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             while (true) {
-                val currentState = _uiState.value as? ListeningUiState.Active
-                val currentIdx = currentState?.currentSectionIndex ?: 0
+                val currentState = _uiState.value as? ListeningUiState.Active ?: break
+                if (currentState.isFrozen) break
+
                 val duration = audioPlaybackEngine.getDuration()
                 val position = audioPlaybackEngine.getCurrentPosition()
                 val buffered = audioPlaybackEngine.getBufferedPosition()
-                if (duration > 0) {
-                    val sectionProgress = position.toFloat() / duration.toFloat()
-                    _audioPlaybackProgress.value = ((currentIdx.toFloat() + sectionProgress) / 4f).coerceIn(0f, 1f)
 
-                    val sectionBuffer = buffered.toFloat() / duration.toFloat()
-                    _audioBufferProgress.value = ((currentIdx.toFloat() + sectionBuffer) / 4f).coerceIn(0f, 1f)
-                } else {
-                    _audioPlaybackProgress.value = (currentIdx.toFloat() / 4f).coerceIn(0f, 1f)
-                    _audioBufferProgress.value = (currentIdx.toFloat() / 4f).coerceIn(0f, 1f)
+                if (duration > 0) {
+                    _audioPlaybackProgress.value = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                    _audioBufferProgress.value = (buffered.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+
+                    // Initialize countdown dynamically upon reading file duration
+                    if (countdownEndTimeMs == null) {
+                        countdownEndTimeMs = System.currentTimeMillis() + duration + 120_000L // Duration + 120 seconds
+                    }
                 }
+
+                if (countdownEndTimeMs != null) {
+                    val remainingMs = countdownEndTimeMs!! - System.currentTimeMillis()
+                    if (remainingMs > 0) {
+                        _countdownSeconds.value = remainingMs / 1000
+                    } else {
+                        _countdownSeconds.value = 0
+                        submitListeningTest() // Freeze everything exactly at 0.00s
+                        break
+                    }
+                }
+
                 delay(200)
             }
         }
@@ -408,24 +317,7 @@ class ListeningViewModel @Inject constructor(
      * Transition to the next listening section.
      */
     fun advanceToNextSection() {
-        val currentState = _uiState.value as? ListeningUiState.Active ?: return
-        if (currentState.currentSectionIndex < 3) {
-            val nextIndex = currentState.currentSectionIndex + 1
-            _uiState.value = currentState.copy(
-                currentSectionIndex = nextIndex,
-                isAudioPlaying = true,
-                isAudioStarted = true
-            )
-            // Stop previous ExoPlayer audio and play next
-            viewModelScope.launch {
-                audioPlaybackEngine.stop()
-                playCurrentSectionAudio(currentState.sections[nextIndex])
-            }
-        } else {
-            // Already at last section, playback completed!
-            updateActiveAudioPlayingState(false)
-            _audioPlaybackProgress.value = 1f
-        }
+        // Obsolete: Rebuilt to rely entirely on a unified mock track module with one global timer.
     }
 
     /**
@@ -494,6 +386,9 @@ class ListeningViewModel @Inject constructor(
         _answers.value = emptyMap()
         _inputErrors.value = emptyMap()
         _audioPlaybackProgress.value = 0f
+        _audioBufferProgress.value = 0f
+        _countdownSeconds.value = null
+        countdownEndTimeMs = null
         _uiState.value = ListeningUiState.Idle
     }
 

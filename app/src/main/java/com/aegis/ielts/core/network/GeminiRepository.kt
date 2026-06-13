@@ -147,57 +147,7 @@ class GeminiRepository @Inject constructor(
         }
     }
 
-    /**
-     * Synthesizes and downloads a long-form Listening audio stream from the GenAI backend.
-     */
-    suspend fun fetchListeningAudio(
-        sectionNumber: Int,
-        environmentLabel: String,
-        environmentDescription: String,
-        accentLabel: String
-    ): ByteArray {
-        val request = ListeningAudioRequest(
-            section_number = sectionNumber,
-            environment_label = environmentLabel,
-            environment_description = environmentDescription,
-            accent_label = accentLabel
-        )
-        return downloadPostBytes("/api/v1/generate-listening-audio", request)
-    }
-
-    private suspend inline fun <reified Req> downloadPostBytes(
-        path: String,
-        requestBody: Req
-    ): ByteArray = withContext(Dispatchers.IO) {
-        val url = URL("${GeminiApiClient.BACKEND_URL}$path")
-        val conn = url.openConnection() as HttpURLConnection
-        try {
-            conn.requestMethod = "POST"
-            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            conn.setRequestProperty("Accept", "audio/mpeg, audio/wav, */*")
-            conn.doOutput = true
-            conn.doInput = true
-            conn.connectTimeout = 60000
-            conn.readTimeout = 90000
-
-            val jsonRequest = json.encodeToString(requestBody)
-            conn.outputStream.use { os ->
-                val input = jsonRequest.toByteArray(Charsets.UTF_8)
-                os.write(input, 0, input.size)
-            }
-
-            val responseCode = conn.responseCode
-            if (responseCode in 200..299) {
-                conn.inputStream.use { it.readBytes() }
-            } else {
-                val errorMsg = conn.errorStream?.bufferedReader()?.use { it.readText() } 
-                    ?: "Response code: $responseCode"
-                throw IOException("Backend error ($responseCode): $errorMsg")
-            }
-        } finally {
-            conn.disconnect()
-        }
-    }
+    // Removed fetchListeningAudio as we now use local assets exclusively
 
     /**
      * Wakes up the Render backend to overcome cold-start dormancy (15 mins inactivity).
@@ -328,14 +278,6 @@ class GeminiRepository @Inject constructor(
         """.trimIndent()
     }
 }
-
-@Serializable
-data class ListeningAudioRequest(
-    val section_number: Int,
-    val environment_label: String,
-    val environment_description: String,
-    val accent_label: String
-)
 
 @Serializable
 data class SpeakingGradeRequest(

@@ -45,7 +45,6 @@ class AudioPlaybackEngine @Inject constructor(
     private val engineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var player: ExoPlayer? = null
-    private var currentFallbackAssetPath: String? = null
 
     private val _playbackState = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
     val playbackState: StateFlow<PlaybackState> = _playbackState.asStateFlow()
@@ -71,31 +70,8 @@ class AudioPlaybackEngine @Inject constructor(
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            if (currentFallbackAssetPath != null) {
-                val assetPath = currentFallbackAssetPath
-                currentFallbackAssetPath = null // Prevent infinite loop
-                engineScope.launch {
-                    try {
-                        // Verify asset exists via AssetFileDescriptor
-                        val afd = context.assets.openFd(assetPath!!)
-                        afd.close()
-                        
-                        val exo = player ?: return@launch
-                        exo.stop()
-                        exo.clearMediaItems()
-                        exo.setMediaItem(MediaItem.fromUri(Uri.parse("asset:///$assetPath")))
-                        exo.prepare()
-                        exo.play()
-                        _playbackState.value = PlaybackState.Loading
-                    } catch (e: Exception) {
-                        _playbackState.value = PlaybackState.Error("Fallback failed: ${e.message}")
-                        _isPlaying.value = false
-                    }
-                }
-            } else {
-                _playbackState.value = PlaybackState.Error(error.message ?: "Unknown playback error")
-                _isPlaying.value = false
-            }
+            _playbackState.value = PlaybackState.Error(error.message ?: "Unknown playback error")
+            _isPlaying.value = false
         }
     }
 
@@ -114,16 +90,24 @@ class AudioPlaybackEngine @Inject constructor(
     // ─── Public API ───────────────────────────────────────────────────────────
 
     /**
-     * Plays audio from the given [Uri].
+     * Plays audio directly from the bundled Android assets directory.
      * Stopping any current playback before starting the new item.
      * Seek and rewind are not surfaced (exam integrity contract).
      */
-    suspend fun playFromUri(uri: Uri, fallbackAssetPath: String? = null) = withContext(Dispatchers.Main) {
-        currentFallbackAssetPath = fallbackAssetPath
+    suspend fun playFromAsset(assetPath: String) = withContext(Dispatchers.Main) {
         val exo = ensurePlayer()
         exo.stop()
         exo.clearMediaItems()
-        exo.setMediaItem(MediaItem.fromUri(uri))
+        
+        var targetAsset = assetPath
+        try {
+            val afd = context.assets.openFd(targetAsset)
+            afd.close()
+        } catch (e: Exception) {
+            targetAsset = "audio/sample_test.mp3"
+        }
+
+        exo.setMediaItem(MediaItem.fromUri(Uri.parse("asset:///$targetAsset")))
         exo.prepare()
         exo.play()
         _playbackState.value = PlaybackState.Loading

@@ -42,6 +42,7 @@ fun ListeningAssessmentScreen(
     val inputErrors by viewModel.inputErrors.collectAsStateWithLifecycle()
     val playbackProgress by viewModel.audioPlaybackProgress.collectAsStateWithLifecycle()
     val bufferProgress by viewModel.audioBufferProgress.collectAsStateWithLifecycle()
+    val countdownSeconds by viewModel.countdownSeconds.collectAsStateWithLifecycle()
 
     Box(
         modifier = Modifier
@@ -71,6 +72,7 @@ fun ListeningAssessmentScreen(
                         inputErrors = inputErrors,
                         playbackProgress = playbackProgress,
                         bufferProgress = bufferProgress,
+                        countdownSeconds = countdownSeconds,
                         onNavigateBack = { viewModel.resetToIdle() },
                         onSaveAnswer = { qId, ans -> viewModel.saveAnswer(qId, ans) },
                         onSubmitTest = { viewModel.submitListeningTest() },
@@ -298,6 +300,7 @@ private fun ListeningActiveContent(
     inputErrors: Map<String, String?>,
     playbackProgress: Float,
     bufferProgress: Float,
+    countdownSeconds: Long?,
     onNavigateBack: () -> Unit,
     onSaveAnswer: (String, String) -> Unit,
     onSubmitTest: () -> Unit,
@@ -404,8 +407,15 @@ private fun ListeningActiveContent(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
+                            val timerText = if (countdownSeconds != null) {
+                                val m = countdownSeconds!! / 60
+                                val s = countdownSeconds!! % 60
+                                String.format("%02d:%02d left", m, s)
+                            } else {
+                                "${(playbackProgress * 100).toInt()}%"
+                            }
                             Text(
-                                text = "${(playbackProgress * 100).toInt()}%",
+                                text = timerText,
                                 color = SurfaceCyan,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
