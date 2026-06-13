@@ -117,9 +117,41 @@ class ListeningViewModel @Inject constructor(
 
         _uiState.value = (_uiState.value as ListeningUiState.Active).copy(isAudioPlaying = true)
         
-        tts?.speak(currentScript, TextToSpeech.QUEUE_FLUSH, null, "TTS_ID")
+        val locale = when (section.accent) {
+            Accent.STANDARD -> {
+                if (section.sectionNumber == 4) java.util.Locale.US else java.util.Locale.UK
+            }
+            Accent.AUSTRALIAN -> java.util.Locale.forLanguageTag("en-AU")
+            Accent.EUROPEAN -> java.util.Locale.CANADA
+            Accent.SOUTH_ASIAN -> java.util.Locale.forLanguageTag("en-IN")
+            Accent.AFRICAN -> java.util.Locale.forLanguageTag("en-ZA")
+        }
+        tts?.setLanguage(locale)
+
+        val lines = currentScript.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isNotEmpty()) {
+            speakLine(lines[0], queueMode = TextToSpeech.QUEUE_FLUSH)
+            for (i in 1 until lines.size) {
+                speakLine(lines[i], queueMode = TextToSpeech.QUEUE_ADD)
+            }
+        }
         
         startProgressIndicatorTicker()
+    }
+
+    private fun speakLine(line: String, queueMode: Int) {
+        if (line.startsWith("Speaker A:")) {
+            val text = line.substringAfter("Speaker A:").trim()
+            tts?.setPitch(0.8f)
+            tts?.speak(text, queueMode, null, "TTS_LINE_${System.nanoTime()}")
+        } else if (line.startsWith("Speaker B:")) {
+            val text = line.substringAfter("Speaker B:").trim()
+            tts?.setPitch(1.2f)
+            tts?.speak(text, queueMode, null, "TTS_LINE_${System.nanoTime()}")
+        } else {
+            tts?.setPitch(1.0f)
+            tts?.speak(line, queueMode, null, "TTS_LINE_${System.nanoTime()}")
+        }
     }
 
     private fun startProgressIndicatorTicker() {
