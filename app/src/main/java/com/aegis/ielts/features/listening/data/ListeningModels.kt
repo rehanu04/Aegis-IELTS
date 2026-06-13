@@ -101,5 +101,6 @@ data class ListeningGradingReport(
     val totalQuestions: Int,
     val bandScore: Float,
     val sectionAccents: List<String>, // Accents chosen for the 4 sections
-    val userAnswers: Map<String, String> // questionId -> selected/typed answer
+    val userAnswers: Map<String, String>, // questionId -> selected/typed answer
+    val correctAnswers: Map<String, String> // questionId -> correct answer
 )

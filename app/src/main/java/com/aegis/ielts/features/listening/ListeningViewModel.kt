@@ -38,20 +38,7 @@ class ListeningViewModel @Inject constructor(
         }
     }
 
-    private val listeningScript = """
-        Welcome to the Aegis campus. I'm the student receptionist. Let's get your registration sorted. 
-        First, I have your family name listed as HEMINGWAY. Is that correct?
-        And your contact number, we have it as 07700900077.
-        Regarding the nature reserve trip next week, be aware there are major traffic delays expected. 
-        It's not wildlife crossings or seasonal flooding as usual, but rather bridge construction on the main road.
-        The reserve café is quite popular. It's open to the public on weekends only.
-        Now, let me help you with the campus map. The Student Help Center Office is located at building B, right next to the east gate.
-        And the Main Lecture Hall Complex is building C, in the center of the campus.
-        For your history of architecture elective, you'll study different designs. For example, the Gothic Arches System falls under the MEDIEVAL period, while the Steel Beam Foundations are distinctly MODERN.
-        Oh, and a quick update on the library. The new opening hour on Sundays is 10:00 AM. 
-        If you need to return books after hours, the Book Return Box location is right at the ENTRANCE.
-        That covers everything. Good luck with your studies!
-    """.trimIndent()
+    private var currentScript = ""
 
     // ─── UI State ─────────────────────────────────────────────────────────────
     private val _uiState = MutableStateFlow<ListeningUiState>(ListeningUiState.Idle)
@@ -88,82 +75,9 @@ class ListeningViewModel @Inject constructor(
      * Samples accents according to probabilities and shuffles sections (Unpredictable Task Router).
      */
     fun startListeningAssessment() {
-        // Pool A questions (unified mock track)
-        val unifiedSection = ListeningSection(
-            sectionNumber = 1,
-            environment = ListeningEnvironment.SOCIAL_DIALOGUE,
-            accent = Accent.STANDARD,
-            questions = listOf(
-                ListeningQuestion.FormCompletion(
-                    id = "q1_form_name",
-                    instruction = "Write ONE WORD ONLY for each answer.",
-                    questionText = "Family Name",
-                    correctAnswer = "HEMINGWAY"
-                ),
-                ListeningQuestion.FormCompletion(
-                    id = "q1_form_phone",
-                    instruction = "Write NUMBERS ONLY for each answer.",
-                    questionText = "Contact Number",
-                    correctAnswer = "07700900077",
-                    charLimit = 11
-                ),
-                ListeningQuestion.MultipleChoice(
-                    id = "q2_mcq_1",
-                    instruction = "Choose the correct letter, A, B or C.",
-                    questionText = "What is the primary cause of traffic delays in the nature reserve?",
-                    options = listOf("A. Wildlife crossings", "B. Bridge construction", "C. Seasonal flooding"),
-                    correctAnswer = "B"
-                ),
-                ListeningQuestion.MultipleChoice(
-                    id = "q2_mcq_2",
-                    instruction = "Choose the correct letter, A, B or C.",
-                    questionText = "When is the reserve café open to the public?",
-                    options = listOf("A. On weekends only", "B. Throughout the year", "C. During summer months"),
-                    correctAnswer = "A"
-                ),
-                ListeningQuestion.MapLabeling(
-                    id = "q3_map_1",
-                    instruction = "Write the correct letter, A-E, next to the location description.",
-                    questionText = "Student Help Center Office",
-                    correctAnswer = "B"
-                ),
-                ListeningQuestion.MapLabeling(
-                    id = "q3_map_2",
-                    instruction = "Write the correct letter, A-E, next to the location description.",
-                    questionText = "Main Lecture Hall Complex",
-                    correctAnswer = "C"
-                ),
-                ListeningQuestion.Matching(
-                    id = "q4_match_1",
-                    instruction = "Classify the architectural designs under correct historical periods.",
-                    questionText = "Gothic Arches System",
-                    categories = listOf("MEDIEVAL", "RENAISSANCE", "MODERN"),
-                    correctAnswer = "MEDIEVAL"
-                ),
-                ListeningQuestion.Matching(
-                    id = "q4_match_2",
-                    instruction = "Classify the architectural designs under correct historical periods.",
-                    questionText = "Steel Beam Foundations",
-                    categories = listOf("MEDIEVAL", "RENAISSANCE", "MODERN"),
-                    correctAnswer = "MODERN"
-                ),
-                // Added two more questions to make it 10 total
-                ListeningQuestion.MultipleChoice(
-                    id = "q5_mcq_1",
-                    instruction = "Choose the correct letter, A, B or C.",
-                    questionText = "What is the new library opening hour on Sundays?",
-                    options = listOf("A. 9:00 AM", "B. 10:00 AM", "C. 12:00 PM"),
-                    correctAnswer = "B"
-                ),
-                ListeningQuestion.FormCompletion(
-                    id = "q5_form_1",
-                    instruction = "Write ONE WORD ONLY for each answer.",
-                    questionText = "Book Return Box Location",
-                    correctAnswer = "ENTRANCE"
-                )
-            ),
-            audioAssetPath = "audio/section_1.mp3"
-        )
+        val mockTest = com.aegis.ielts.features.listening.data.MockExamData.tests.random()
+        val unifiedSection = mockTest.section
+        currentScript = mockTest.script
 
         val activeSections = listOf(unifiedSection)
 
@@ -173,7 +87,6 @@ class ListeningViewModel @Inject constructor(
         _audioPlaybackProgress.value = 0f
         _audioBufferProgress.value = 0f
         _countdownSeconds.value = null
-        countdownEndTimeMs = null
 
         _uiState.value = ListeningUiState.Active(
             sections = activeSections,
@@ -204,7 +117,7 @@ class ListeningViewModel @Inject constructor(
 
         _uiState.value = (_uiState.value as ListeningUiState.Active).copy(isAudioPlaying = true)
         
-        tts?.speak(listeningScript, TextToSpeech.QUEUE_FLUSH, null, "TTS_ID")
+        tts?.speak(currentScript, TextToSpeech.QUEUE_FLUSH, null, "TTS_ID")
         
         startProgressIndicatorTicker()
     }
@@ -332,12 +245,15 @@ class ListeningViewModel @Inject constructor(
         val rawScale = (correctCount * 1.125f).coerceIn(0f, 9f)
         val band = IeltsBandScore(rawScale).band
 
+        val correctAnswersMap = allQuestions.associate { it.id to it.correctAnswer }
+
         val report = ListeningGradingReport(
             rawScore = correctCount,
             totalQuestions = allQuestions.size,
             bandScore = band,
             sectionAccents = currentState.sections.map { it.accent.label },
-            userAnswers = _answers.value
+            userAnswers = _answers.value,
+            correctAnswers = correctAnswersMap
         )
 
         _uiState.value = ListeningUiState.EvaluationComplete(report)

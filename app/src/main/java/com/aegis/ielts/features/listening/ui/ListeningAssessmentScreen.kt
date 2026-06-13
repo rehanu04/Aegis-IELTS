@@ -1129,7 +1129,8 @@ private fun ListeningEvaluationCompleteContent(
 
         // Question Details Script
         report.userAnswers.forEach { (qId, userAns) ->
-            val isCorrect = userAns.trim().uppercase() == getCorrectAnswer(qId).trim().uppercase()
+            val correctAns = report.correctAnswers[qId] ?: ""
+            val isCorrect = userAns.trim().uppercase() == correctAns.trim().uppercase()
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = SurfaceCard),
@@ -1183,7 +1184,7 @@ private fun ListeningEvaluationCompleteContent(
                     if (!isCorrect) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Correct Answer: " + getCorrectAnswer(qId),
+                            text = "Correct Answer: " + (report.correctAnswers[qId] ?: ""),
                             color = AccentGreen,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
