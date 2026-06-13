@@ -30,7 +30,7 @@ import com.aegis.ielts.features.speaking.ExaminerEngineState
 import com.aegis.ielts.features.speaking.SpeakingUiState
 import com.aegis.ielts.features.speaking.SpeakingViewModel
 import com.aegis.ielts.features.speaking.ui.components.AudioWaveformVisualizer
-import com.aegis.ielts.ui.components.shared.ParticleBlobOrb
+import com.aegis.ielts.ui.components.shared.VoiceAgentBlob
 import com.aegis.ielts.ui.components.shared.StarfieldBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -53,11 +53,35 @@ fun IeltsSpeakingAssessmentScreen(
     var ttsInitialized by remember { mutableStateOf(false) }
 
     DisposableEffect(ctx) {
+        var ttsRef: android.speech.tts.TextToSpeech? = null
         val ttsEngine = android.speech.tts.TextToSpeech(ctx) { status ->
             if (status == android.speech.tts.TextToSpeech.SUCCESS) {
                 ttsInitialized = true
+                try {
+                    val englishVoices = ttsRef?.voices?.filter {
+                        it.locale.language.equals("en", ignoreCase = true) && !it.isNetworkConnectionRequired
+                    }
+                    if (englishVoices != null && englishVoices.isNotEmpty()) {
+                        val alternateGender = (System.currentTimeMillis() % 2 == 0L)
+                        val voice = if (alternateGender) {
+                            englishVoices.firstOrNull { it.name.contains("male", ignoreCase = true) }
+                                ?: englishVoices.firstOrNull { it.name.contains("en-gb-x-gfm", ignoreCase = true) }
+                                ?: englishVoices.random()
+                        } else {
+                            englishVoices.firstOrNull { it.name.contains("female", ignoreCase = true) }
+                                ?: englishVoices.firstOrNull { it.name.contains("en-gb-x-fis", ignoreCase = true) }
+                                ?: englishVoices.random()
+                        }
+                        ttsRef?.voice = voice
+                    } else {
+                        ttsRef?.language = java.util.Locale.UK
+                    }
+                } catch (e: Exception) {
+                    ttsRef?.language = java.util.Locale.UK
+                }
             }
         }
+        ttsRef = ttsEngine
         ttsEngine.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
@@ -180,7 +204,7 @@ fun IeltsSpeakingAssessmentScreen(
                     is SpeakingUiState.Idle -> {
                         Spacer(Modifier.weight(1f))
                         Box(modifier = Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
-                            ParticleBlobOrb(isThinking = false, isTalking = false, isListening = false)
+                            VoiceAgentBlob(isThinking = false, isTalking = false, isListening = false, amplitude = 0f)
                         }
                         Spacer(Modifier.height(32.dp))
                         Text(
@@ -246,10 +270,11 @@ fun IeltsSpeakingAssessmentScreen(
 
                         // Interactive Orb Driver mapping to high-precision telemetry states
                         Box(modifier = Modifier.fillMaxWidth().height(320.dp), contentAlignment = Alignment.Center) {
-                            ParticleBlobOrb(
+                            VoiceAgentBlob(
                                 isThinking = state.engineState == ExaminerEngineState.ANALYZING || state.engineState == ExaminerEngineState.CONNECTING,
                                 isTalking = state.engineState == ExaminerEngineState.EXAMINER_SPEAKING,
-                                isListening = state.engineState == ExaminerEngineState.CANDIDATE_RECORDING
+                                isListening = state.engineState == ExaminerEngineState.CANDIDATE_RECORDING,
+                                amplitude = rawAmplitudeDb
                             )
                         }
 

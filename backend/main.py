@@ -278,7 +278,7 @@ async def grade_speaking(request: SpeakingGradeRequest):
     if client:
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-1.5-flash",
                 contents=user_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -333,6 +333,8 @@ class SpeakingNextQuestionRequest(BaseModel):
     previous_transcript: Optional[str] = Field(default=None, description="Candidate STT transcript block")
     current_question_index: int = Field(..., description="Index of the question just answered")
     current_part: int = Field(..., description="Active IELTS Part (1, 2, or 3)")
+    prompts: Optional[List[str]] = Field(default=[], description="List of previous prompts")
+    transcripts: Optional[List[str]] = Field(default=[], description="List of previous transcripts")
 
 
 class SpeakingNextQuestionResponse(BaseModel):
@@ -367,7 +369,7 @@ async def listening_stream(
         
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-1.5-flash",
                 contents=user_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -423,7 +425,7 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
             
             if client and os.getenv("GEMINI_API_KEY"):
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-1.5-flash",
                     contents=[
                         audio_part,
                         "Transcribe the spoken words in this audio clearly. Do not add any extra text or comments. Just return the transcription."
@@ -467,28 +469,49 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     
     next_question = ""
     if client and os.getenv("GEMINI_API_KEY"):
-        system_instruction = f"""
-        You are a certified IELTS Speaking examiner. Act like a real human examiner—respond dynamically or ask a direct contextual follow-up question based specifically on what the candidate just said.
-        The candidate said: "{transcript}"
+        system_instruction = """You are a Certified Senior IELTS Academic Oral Examiner conducting a fluid, face-to-face interview. 
+Your conversation flow must adapt dynamically to the candidate's speech transcript. 
+CRITICAL: Read the candidate's last input carefully. If the candidate has already proactively answered standard upcoming script questions (such as stating their full name, location, department, or academic background during their initial response), you must dynamically STRIKE OUT those redundant questions from your itinerary. Never ask a candidate for information they have already provided. Acknowledge their points contextually (e.g., 'Ah, Bangalore, a fantastic tech hub...'), and transition smoothly to a fresh, non-redundant Part 1 follow-up topic or Part 2 cue card question."""
         
-        If this was Part 1 (current_part=1) or Part 3 (current_part=3), and the candidate gave a substantive response, acknowledge their answer naturally and ask a logical follow-up question closely related to their specific points before moving to the next official IELTS topic.
-        
-        If this is Part 2 (current_part=2), ask the standard Cue Card follow-up.
-        If the candidate's response was extremely short or silent, gently prompt them to elaborate or ask the next standard IELTS question.
-        """
-        user_prompt = f"Generate the next examiner question. Current index: {request.current_question_index}, Part: {request.current_part}."
         try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_prompt,
+            # Reconstruct chat history using types.Content
+            history = []
+            
+            # Match past turns
+            for i in range(len(request.transcripts or [])):
+                if i < len(request.prompts or []):
+                    history.append(types.Content(
+                        role="model",
+                        parts=[types.Part(text=request.prompts[i])]
+                    ))
+                history.append(types.Content(
+                    role="user",
+                    parts=[types.Part(text=request.transcripts[i])]
+                ))
+                
+            # Current prompt asked before the candidate spoke
+            if len(request.prompts or []) > len(request.transcripts or []):
+                history.append(types.Content(
+                    role="model",
+                    parts=[types.Part(text=request.prompts[-1])]
+                ))
+
+            # Initialize Chat Session
+            chat = client.chats.create(
+                model="gemini-1.5-flash",
+                history=history,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     temperature=0.7
                 )
             )
+            
+            # Send candidate transcript as the message to chat
+            user_message = f"Candidate response: {transcript}. Generate the next examiner question. Current index: {request.current_question_index}, Part: {request.current_part}."
+            response = chat.send_message(user_message)
             next_question = response.text.strip() if response.text else ""
         except Exception as e:
-            logger.error(f"Error generating follow-up: {e}")
+            logger.error(f"Error generating follow-up in chat session: {e}")
             
     if not next_question:
         next_idx = (request.current_question_index + 1) % len(all_questions)
@@ -523,9 +546,9 @@ async def generate_listening_audio(request: ListeningAudioRequest):
     user_prompt = f"Please read the continuous {request.accent_label} narrative for Section {request.section_number}."
     
     try:
-        # We use gemini-2.5-flash which supports response_modalities=["AUDIO"]
+        # We use gemini-1.5-flash which supports response_modalities=["AUDIO"]
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-1.5-flash",
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,

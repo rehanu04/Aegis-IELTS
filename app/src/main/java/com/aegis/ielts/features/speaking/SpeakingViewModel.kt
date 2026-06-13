@@ -39,7 +39,7 @@ class SpeakingViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context
 ) : ViewModel() {
 
-    private val isProcessingResponse = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val isProcessingResponse = java.util.concurrent.atomic.AtomicBoolean(true)
     private var lastEvaluationResponse: SpeakingAssessmentResponse? = null
     private var isFinalFeedback = false
 
@@ -188,6 +188,7 @@ class SpeakingViewModel @Inject constructor(
         startTimer()
 
         // Start capturing audio
+        isProcessingResponse.set(false)
         audioCaptureEngine.startCapture()
 
         // VAD 3.5s silence monitor loop (calibrated to standard IELTS speaking speed)
@@ -238,7 +239,9 @@ class SpeakingViewModel @Inject constructor(
             audio_base64 = audioBase64,
             previous_transcript = null,
             current_question_index = currentQuestionIdx,
-            current_part = activePart
+            current_part = activePart,
+            prompts = accumulatedPrompts + currentState.promptText,
+            transcripts = accumulatedTranscripts
         )
 
         try {
@@ -251,7 +254,6 @@ class SpeakingViewModel @Inject constructor(
                     currentQuestionIdx++
                     val nextPart = if (currentQuestionIdx in 0..2) 1 else if (currentQuestionIdx == 3) 2 else 3
                     
-                    isProcessingResponse.set(false)
                     _uiState.value = SpeakingUiState.MockTestActive(
                         engineState = ExaminerEngineState.EXAMINER_SPEAKING,
                         promptText = response.next_question,
@@ -282,7 +284,6 @@ class SpeakingViewModel @Inject constructor(
                             lastEvaluationResponse = finalResponse
                             isFinalFeedback = true
                             
-                            isProcessingResponse.set(false)
                             _uiState.value = SpeakingUiState.MockTestActive(
                                 engineState = ExaminerEngineState.EXAMINER_SPEAKING,
                                 promptText = finalResponse.overallFeedback,
@@ -290,17 +291,14 @@ class SpeakingViewModel @Inject constructor(
                                 currentQuestionIndex = currentQuestionIdx
                             )
                         }.onFailure { error ->
-                            isProcessingResponse.set(false)
                             _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to evaluate speaking performance.")
                         }
                     }
                 }
             }.onFailure { error ->
-                isProcessingResponse.set(false)
                 _uiState.value = SpeakingUiState.Error(error.message ?: "Failed to get next question.")
             }
         } catch (e: Exception) {
-            isProcessingResponse.set(false)
             _uiState.value = SpeakingUiState.Error(e.message ?: "An error occurred during communication.")
         }
     }
