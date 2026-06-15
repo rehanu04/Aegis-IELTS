@@ -50,7 +50,7 @@ fun VoiceAgentBlob(
     val targetColor = when {
         isListening -> Color(0xFF00FF88) // Vibrant emerald green for recording
         isTalking -> Color(0xFF00F5FF)   // Galactic Cyan for examiner speaking
-        else -> Color(0xFF1A1C1E)        // Twilight Slate for idle/thinking
+        else -> Color(0xFF008080)        // Teal for idle/thinking
     }
     val blobColor by animateColorAsState(
         targetValue = targetColor,

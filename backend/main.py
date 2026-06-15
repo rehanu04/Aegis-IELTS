@@ -338,11 +338,11 @@ class SpeakingNextQuestionRequest(BaseModel):
 
 
 class SpeakingNextQuestionResponse(BaseModel):
-    transcript: str = Field(..., description="Candidate response transcript")
-    next_question: str = Field(..., description="Logical follow-up question or next topic")
-    next_part: int = Field(..., description="The next active part of the test (1, 2, or 3)")
-    next_question_index: int = Field(..., description="The next active question index")
-    is_test_complete: bool = Field(default=False, description="True if the test is complete and should transition to evaluation")
+    transcript: str = Field(description="The decoded transcript or conversational acknowledgment.")
+    next_question: str = Field(description="The dynamic, context-aware next question for the candidate.")
+    next_part: int = Field(description="The active IELTS Part index (1, 2, or 3).")
+    next_question_index: int = Field(description="The index counter for tracking the conversational turn.")
+    is_test_complete: bool = Field(description="Flag to mark when all conversational parts are officially concluded.")
 
 
 @app.get("/api/v1/listening/stream")
@@ -472,7 +472,7 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     
     response_obj = None
     if client and os.getenv("GEMINI_API_KEY"):
-        system_instruction = """You are a Certified Senior IELTS Academic Oral Examiner conducting a fluid, face-to-face interview.
+        system_instruction = """You are a Certified Senior, Professional IELTS Academic Oral Examiner conducting a true two-way human dialogue.
 Your conversation flow must adapt dynamically to the candidate's speech transcript.
 
 The standard exam itinerary contains these 7 questions:
@@ -489,14 +489,13 @@ Part 3:
 
 CRITICAL BEHAVIOR:
 1. Clean up and transcribe/normalize the candidate's latest response.
-2. Analyze the entire conversation history (all prompts and candidate transcripts) and the candidate's latest response to see which of the 7 standard questions have already been answered (either because they were asked, or because the candidate proactively mentioned the information).
-   - Example: If the candidate was asked question 0 (their name) and replied: "My name is Rehan, I'm from Bangalore where I graduated in Computer Science with a 9.2 CGPA, and I love playing football in my free time", then questions 0, 1, and 2 are all answered!
-3. Identify the next unanswered question in the sequence:
+2. Critically read the candidate's full response. If the candidate proactively supplies information (e.g. stating name, city, department, graduation CGPA, and college specialization) that matches upcoming generic introductory prompts, you must dynamically skip/strike off those redundant questions from your itinerary. Never ask a candidate for information they have already provided.
+3. You must "catch" something contextually specific from what the candidate said, comment on it naturally (e.g. acknowledging an engineering specialization, or their location in Bangalore), and formulate a tailored follow-up question before routing back to the core thematic modules.
+4. Identify the next unanswered question in the sequence:
    - If there are unanswered questions in Part 1 (indices 0, 1, 2), ask the next unanswered one. Set next_part=1, next_question_index=<index>.
    - If all Part 1 questions are answered, transition to Part 2 (index 3). Set next_part=2, next_question_index=3.
    - If Part 2 is answered, transition to Part 3 (indices 4, 5, 6). Ask the next unanswered one. Set next_part=3, next_question_index=<index>.
    - If all questions (including Part 3) are answered, set is_test_complete=true.
-4. When asking the next question, you may contextually acknowledge their previous response (e.g. "Ah, Bangalore, a fantastic tech hub. Now, let's talk about free time...") but then immediately ask the next question.
 5. If is_test_complete is true, set next_question to "Thank you. That is the end of the speaking test." and set next_part=3, next_question_index=6.
 
 Return a JSON object conforming exactly to the response schema."""
