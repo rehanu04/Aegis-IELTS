@@ -8,9 +8,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -205,7 +208,7 @@ fun IeltsSpeakingAssessmentScreen(
                     is SpeakingUiState.Idle -> {
                         Spacer(Modifier.weight(1f))
                         Box(modifier = Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
-                            VoiceAgentBlob(isThinking = false, isTalking = false, isListening = false, amplitude = 0f)
+                            ParticleBlobOrb(isThinking = false, isTalking = false, isListening = false, amplitude = 0f)
                         }
                         Spacer(Modifier.height(32.dp))
                         Text(
@@ -271,7 +274,7 @@ fun IeltsSpeakingAssessmentScreen(
 
                         // Interactive Orb Driver mapping to high-precision telemetry states
                         Box(modifier = Modifier.fillMaxWidth().height(320.dp), contentAlignment = Alignment.Center) {
-                            VoiceAgentBlob(
+                            ParticleBlobOrb(
                                 isThinking = state.engineState == ExaminerEngineState.ANALYZING || state.engineState == ExaminerEngineState.CONNECTING,
                                 isTalking = state.engineState == ExaminerEngineState.EXAMINER_SPEAKING,
                                 isListening = state.engineState == ExaminerEngineState.CANDIDATE_RECORDING,
@@ -378,3 +381,135 @@ fun IeltsSpeakingAssessmentScreen(
 
 // Extension to cleanly isolate layout spacing padding allocations
 private fun Modifier.bottomSpace() = this.padding(bottom = 48.dp)
+
+@Composable
+fun ParticleBlobOrb(
+    isThinking: Boolean,
+    isTalking: Boolean,
+    isListening: Boolean,
+    amplitude: Float,
+    modifier: Modifier = Modifier
+) {
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsState()
+
+    val targetColor = when {
+        isListening -> Color(0xFF10B981) // Green for Candidate Voice Capture
+        isThinking -> Color(0xFFD4AF37)  // Yellow for Analyzing
+        isTalking -> Color(0xFF38BDF8)   // Cyan for AI Speaking
+        else -> Color(0xFF008080)        // Teal for Idle
+    }
+
+    val coreColor by animateColorAsState(targetValue = targetColor, animationSpec = tween(1500), label = "OrbCoreColor")
+
+    var rotX by remember { mutableFloatStateOf(0f) }
+    var rotY by remember { mutableFloatStateOf(0f) }
+    var rotZ by remember { mutableFloatStateOf(0f) }
+    var waveTime by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(lifecycleState) {
+        if (lifecycleState == androidx.lifecycle.Lifecycle.State.RESUMED) {
+            var lastTime = withFrameNanos { it }
+            while (true) {
+                val currentTime = withFrameNanos { it }
+                val deltaMs = (currentTime - lastTime) / 1_000_000f
+                lastTime = currentTime
+
+                if (deltaMs < 100f) {
+                    rotY += deltaMs * 0.0004f
+                    rotX += deltaMs * 0.0002f
+                    rotZ += deltaMs * 0.0003f
+                    waveTime += deltaMs * 0.003f
+                }
+            }
+        }
+    }
+
+    val targetBounce = if (isTalking) 0.15f else if (isListening) (0.08f + amplitude * 0.25f) else 0.02f
+    val currentBounce by animateFloatAsState(
+        targetValue = targetBounce,
+        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        label = "OrbBounce"
+    )
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val numPoints = 800
+        val goldenRatio = (1.0 + kotlin.math.sqrt(5.0)) / 2.0
+        val angleIncrement = Math.PI * 2.0 * goldenRatio
+
+        val radius = size.width / 3.4f
+        val center = Offset(size.width / 2, size.height / 2)
+        val focalLength = radius * 3.0f
+
+        val glowRadius = radius * 2.5f
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(coreColor.copy(alpha = 0.25f), Color.Transparent),
+                center = center,
+                radius = glowRadius
+            ),
+            radius = glowRadius,
+            center = center
+        )
+
+        data class Point3D(val z: Float, val screenX: Float, val screenY: Float, val pointRadius: Float, val alpha: Float)
+        val projectedPoints = mutableListOf<Point3D>()
+
+        val rotZ_D = rotZ.toDouble()
+        val rotX_D = rotX.toDouble()
+        val rotY_D = rotY.toDouble()
+
+        for (i in 0 until numPoints) {
+            val t = i.toDouble() / numPoints.toDouble()
+            val phi = kotlin.math.acos(1.0 - 2.0 * t)
+            val theta = angleIncrement * i
+
+            val startX = (kotlin.math.sin(phi) * kotlin.math.cos(theta)).toFloat()
+            val startY = (kotlin.math.sin(phi) * kotlin.math.sin(theta)).toFloat()
+            val startZ = (kotlin.math.cos(phi)).toFloat()
+
+            val x1 = (startX * kotlin.math.cos(rotZ_D) - startY * kotlin.math.sin(rotZ_D)).toFloat()
+            val y1 = (startX * kotlin.math.sin(rotZ_D) + startY * kotlin.math.cos(rotZ_D)).toFloat()
+            val y2 = (y1 * kotlin.math.cos(rotX_D) - startZ * kotlin.math.sin(rotX_D)).toFloat()
+            val z2 = (y1 * kotlin.math.sin(rotX_D) + startZ * kotlin.math.cos(rotX_D)).toFloat()
+            val finalX = (x1 * kotlin.math.cos(rotY_D) - z2 * kotlin.math.sin(rotY_D)).toFloat()
+            val finalZ = (x1 * kotlin.math.sin(rotY_D) + z2 * kotlin.math.cos(rotY_D)).toFloat()
+
+            val waveSpeed = if (isTalking) 8f else 3f
+            val wTime = waveTime * waveSpeed
+
+            val waveX = kotlin.math.sin((finalX * 4f + wTime).toDouble()).toFloat()
+            val waveY = kotlin.math.cos((y2 * 4f - wTime * 0.8f).toDouble()).toFloat()
+            val waveZ = kotlin.math.sin((finalZ * 4f + wTime * 1.2f).toDouble()).toFloat()
+
+            val organicDeformation = (waveX + waveY + waveZ) / 3f
+            val currentRadius = radius * (1f + (organicDeformation * currentBounce))
+
+            val pulseX = finalX * currentRadius
+            val pulseY = y2 * currentRadius
+            val pulseZ = finalZ * currentRadius
+
+            val perspectiveScale = focalLength / (focalLength - pulseZ)
+            val screenX = center.x + (pulseX * perspectiveScale)
+            val screenY = center.y + (pulseY * perspectiveScale)
+
+            val pointRadius = 2.0f * perspectiveScale
+            val depthRatio = (pulseZ + radius) / (radius * 2f)
+
+            var alpha = depthRatio.coerceIn(0.3f, 1.0f)
+            if (pulseZ < 0) alpha *= 0.7f
+
+            projectedPoints.add(Point3D(pulseZ, screenX, screenY, pointRadius, alpha))
+        }
+
+        projectedPoints.sortBy { it.z }
+
+        for (pt in projectedPoints) {
+            drawCircle(
+                color = coreColor.copy(alpha = pt.alpha),
+                radius = pt.pointRadius,
+                center = Offset(pt.screenX, pt.screenY)
+            )
+        }
+    }
+}

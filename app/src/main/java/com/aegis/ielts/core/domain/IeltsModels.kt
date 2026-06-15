@@ -263,13 +263,15 @@ data class WritingAssessmentResponse(
 }
 
 @Serializable
+data class ChatTurn(val role: String, val text: String)
+
+@Serializable
 data class SpeakingNextQuestionRequest(
     val audio_base64: String?,
     val previous_transcript: String?,
     val current_question_index: Int,
     val current_part: Int,
-    val prompts: List<String> = emptyList(),
-    val transcripts: List<String> = emptyList()
+    val chat_history: String
 )
 
 @Serializable

@@ -333,8 +333,7 @@ class SpeakingNextQuestionRequest(BaseModel):
     previous_transcript: Optional[str] = Field(default=None, description="Candidate STT transcript block")
     current_question_index: int = Field(..., description="Index of the question just answered")
     current_part: int = Field(..., description="Active IELTS Part (1, 2, or 3)")
-    prompts: Optional[List[str]] = Field(default=[], description="List of previous prompts")
-    transcripts: Optional[List[str]] = Field(default=[], description="List of previous transcripts")
+    chat_history: str = Field(..., description="JSON serialized string of past turns")
 
 
 class SpeakingNextQuestionResponse(BaseModel):
@@ -470,8 +469,17 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     ]
     all_questions = part1_questions + [part2_question] + part3_questions
     
+    # Parse chat_history from JSON string
+    import json
+    try:
+        chat_turns = json.loads(request.chat_history)
+    except Exception as e:
+        logger.error(f"Error parsing chat_history: {e}")
+        chat_turns = []
+
     # Semantic keyword override context filters
-    combined_transcript_history = (transcript + " " + " ".join(request.transcripts or [])).lower()
+    previous_transcripts = [turn.get("text", "") for turn in chat_turns if turn.get("role") == "Candidate"]
+    combined_transcript_history = (transcript + " " + " ".join(previous_transcripts)).lower()
     location_resolved = False
     education_employment_resolved = False
 
@@ -550,23 +558,13 @@ Return a JSON object conforming exactly to the response schema."""
             # Reconstruct chat history using types.Content
             history = []
             
-            # Match past turns
-            for i in range(len(request.transcripts or [])):
-                if i < len(request.prompts or []):
-                    history.append(types.Content(
-                        role="model",
-                        parts=[types.Part(text=request.prompts[i])]
-                    ))
+            # Match past turns from chat_turns except the last one (current candidate response)
+            history_turns = chat_turns[:-1] if len(chat_turns) > 1 else []
+            for turn in history_turns:
+                role = "user" if turn.get("role") == "Candidate" else "model"
                 history.append(types.Content(
-                    role="user",
-                    parts=[types.Part(text=request.transcripts[i])]
-                ))
-                
-            # Current prompt asked before the candidate spoke
-            if len(request.prompts or []) > len(request.transcripts or []):
-                history.append(types.Content(
-                    role="model",
-                    parts=[types.Part(text=request.prompts[-1])]
+                    role=role,
+                    parts=[types.Part(text=turn.get("text", ""))]
                 ))
 
             contents = list(history)

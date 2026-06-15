@@ -8,6 +8,9 @@ import com.aegis.ielts.core.audio.PlaybackState
 import com.aegis.ielts.core.domain.SpeakingAssessmentResponse
 import com.aegis.ielts.core.domain.SpeakingNextQuestionRequest
 import com.aegis.ielts.core.domain.SpeakingNextQuestionResponse
+import com.aegis.ielts.core.domain.ChatTurn
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.aegis.ielts.core.network.GeminiRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -71,8 +74,7 @@ class SpeakingViewModel @Inject constructor(
         "Local films often have very limited budgets and tackle cultural themes that might not translate well to global audiences compared to big Hollywood blockbusters."
     )
 
-    private val accumulatedTranscripts = mutableListOf<String>()
-    private val accumulatedPrompts = mutableListOf<String>()
+    private val chatHistoryList = mutableListOf<ChatTurn>()
     private var currentQuestionIdx = 0
 
     // ─── UI State ─────────────────────────────────────────────────────────────
@@ -120,8 +122,7 @@ class SpeakingViewModel @Inject constructor(
         lastEvaluationResponse = null
         isFinalFeedback = false
         currentQuestionIdx = 0
-        accumulatedTranscripts.clear()
-        accumulatedPrompts.clear()
+        chatHistoryList.clear()
         
         stateMachineJob?.cancel()
         stateMachineJob = viewModelScope.launch {
@@ -139,6 +140,7 @@ class SpeakingViewModel @Inject constructor(
             }
 
             val promptText = allQuestions[currentQuestionIdx]
+            chatHistoryList.add(ChatTurn(role = "Examiner", text = promptText))
             _uiState.value = SpeakingUiState.MockTestActive(
                 engineState = ExaminerEngineState.EXAMINER_SPEAKING,
                 promptText = promptText,
@@ -300,24 +302,33 @@ class SpeakingViewModel @Inject constructor(
         // Launch network request to get the follow-up question
         val finalTranscript = _liveTranscript.value
         val audioBase64 = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
+        
+        // Add candidate's turn to chatHistoryList before sending
+        chatHistoryList.add(ChatTurn(role = "Candidate", text = finalTranscript))
+
         val request = SpeakingNextQuestionRequest(
             audio_base64 = audioBase64,
             previous_transcript = finalTranscript.ifBlank { null },
             current_question_index = currentQuestionIdx,
             current_part = activePart,
-            prompts = accumulatedPrompts + currentState.promptText,
-            transcripts = accumulatedTranscripts
+            chat_history = Json.encodeToString(chatHistoryList)
         )
 
         try {
             val result = geminiRepository.fetchNextSpeakingQuestion(request)
             result.onSuccess { response ->
-                accumulatedTranscripts.add(response.transcript)
-                accumulatedPrompts.add(currentState.promptText)
+                // Clean/correct candidate's last turn from the backend's transcribed response
+                if (chatHistoryList.isNotEmpty() && chatHistoryList.last().role == "Candidate") {
+                    chatHistoryList.removeAt(chatHistoryList.size - 1)
+                }
+                chatHistoryList.add(ChatTurn(role = "Candidate", text = response.transcript))
 
                 if (!response.is_test_complete) {
                     currentQuestionIdx = response.next_question_index
                     
+                    // Add next Examiner question to chatHistoryList
+                    chatHistoryList.add(ChatTurn(role = "Examiner", text = response.next_question))
+
                     _uiState.value = SpeakingUiState.MockTestActive(
                         engineState = ExaminerEngineState.EXAMINER_SPEAKING,
                         promptText = response.next_question,
@@ -333,8 +344,8 @@ class SpeakingViewModel @Inject constructor(
                         currentQuestionIndex = currentQuestionIdx
                     )
 
-                    val combinedTranscript = accumulatedTranscripts.joinToString("\n")
-                    val combinedPrompts = accumulatedPrompts.toList()
+                    val combinedTranscript = chatHistoryList.filter { it.role == "Candidate" }.joinToString("\n") { it.text }
+                    val combinedPrompts = chatHistoryList.filter { it.role == "Examiner" }.map { it.text }
 
                     viewModelScope.launch {
                         val evalResult = geminiRepository.evaluateSpeaking(
