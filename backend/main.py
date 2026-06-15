@@ -475,12 +475,29 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     location_resolved = False
     education_employment_resolved = False
 
-    if "bangalore" in combined_transcript_history or "bengaluru" in combined_transcript_history:
+    # Location indicators: checking for "from [some city/country]", "live in", "living in", "reside in", "hometown", "born/raised in",
+    # or specific common indian/international location keywords.
+    location_indicators = [
+        "from", "live in", "living in", "reside in", "residing in", "hometown",
+        "born in", "raised in", "came from", "located in", "place called",
+        "town of", "city of", "state of", "bangalore", "bengaluru", "mumbai",
+        "delhi", "chennai", "hyderabad", "pune", "mysore", "karnataka", "india",
+        "kolkata", "ahmedabad", "surat", "jaipur", "lucknow", "kanpur", "nagpur",
+        "visakhapatnam", "patna", "coimbatore"
+    ]
+    if any(indicator in combined_transcript_history for indicator in location_indicators):
         location_resolved = True
         logger.info("Semantic override filter: Location context flagged as fully resolved.")
 
-    edu_keywords = ["bachelor", "graduated", "cse", "ai/ml", "cgpa"]
-    if any(kw in combined_transcript_history for kw in edu_keywords):
+    # Education/employment indicators: checking for graduation, study, work, engineering, job, CSE, etc.
+    edu_employment_indicators = [
+        "bachelor", "master", "graduated", "graduate", "graduation", "degree",
+        "cse", "ai/ml", "cgpa", "gpa", "percentage", "engineering", "engineer",
+        "college", "university", "school", "major", "specializ", "specialis",
+        "work", "working", "job", "employ", "career", "profession", "occupation",
+        "study", "studying", "student", "education"
+    ]
+    if any(indicator in combined_transcript_history for indicator in edu_employment_indicators):
         education_employment_resolved = True
         logger.info("Semantic override filter: Education/Employment context flagged as fully resolved.")
 
@@ -576,6 +593,26 @@ Generate the next dynamic, context-aware examiner question in JSON format confor
 
             if response.text:
                 response_obj = SpeakingNextQuestionResponse.model_validate_json(response.text)
+                
+                # --- Post-generation semantic correction to prevent robotic repetition ---
+                if location_resolved and education_employment_resolved:
+                    if response_obj.next_question_index == 1:
+                        logger.warning("Gemini output next_question_index=1 but both location and education are resolved. Force skipping to index 2.")
+                        response_obj.next_question_index = 2
+                        response_obj.next_question = all_questions[2]
+                        response_obj.next_part = 1
+                elif location_resolved:
+                    if response_obj.next_question_index == 1:
+                        # Ensure we don't ask location since it is resolved
+                        if "where" in response_obj.next_question.lower() or "from" in response_obj.next_question.lower():
+                            logger.warning("Gemini output location prompt for index 1, but location is resolved. Correcting question to education query.")
+                            response_obj.next_question = "Do you work or study?"
+                elif education_employment_resolved:
+                    if response_obj.next_question_index == 1:
+                        # Ensure we don't ask work/study since it is resolved
+                        if "work" in response_obj.next_question.lower() or "study" in response_obj.next_question.lower():
+                            logger.warning("Gemini output education prompt for index 1, but education is resolved. Correcting question to location query.")
+                            response_obj.next_question = "Where are you from?"
         except Exception as e:
             logger.error(f"Error generating dynamic follow-up: {e}")
             
