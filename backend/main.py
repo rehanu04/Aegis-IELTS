@@ -340,6 +340,9 @@ class SpeakingNextQuestionRequest(BaseModel):
 class SpeakingNextQuestionResponse(BaseModel):
     transcript: str = Field(..., description="Candidate response transcript")
     next_question: str = Field(..., description="Logical follow-up question or next topic")
+    next_part: int = Field(..., description="The next active part of the test (1, 2, or 3)")
+    next_question_index: int = Field(..., description="The next active question index")
+    is_test_complete: bool = Field(default=False, description="True if the test is complete and should transition to evaluation")
 
 
 @app.get("/api/v1/listening/stream")
@@ -467,11 +470,36 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     ]
     all_questions = part1_questions + [part2_question] + part3_questions
     
-    next_question = ""
+    response_obj = None
     if client and os.getenv("GEMINI_API_KEY"):
-        system_instruction = """You are a Certified Senior IELTS Academic Oral Examiner conducting a fluid, face-to-face interview. 
-Your conversation flow must adapt dynamically to the candidate's speech transcript. 
-CRITICAL: Read the candidate's last input carefully. If the candidate has already proactively answered standard upcoming script questions (such as stating their full name, location, department, or academic background during their initial response), you must dynamically STRIKE OUT those redundant questions from your itinerary. Never ask a candidate for information they have already provided. Acknowledge their points contextually (e.g., 'Ah, Bangalore, a fantastic tech hub...'), and transition smoothly to a fresh, non-redundant Part 1 follow-up topic or Part 2 cue card question."""
+        system_instruction = """You are a Certified Senior IELTS Academic Oral Examiner conducting a fluid, face-to-face interview.
+Your conversation flow must adapt dynamically to the candidate's speech transcript.
+
+The standard exam itinerary contains these 7 questions:
+Part 1:
+0. "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
+1. "Where are you from, and do you work or study?"
+2. "Let's talk about your free time. What hobbies do you enjoy the most?"
+Part 2:
+3. "Describe a book or a movie that had a strong influence on you. You should say what it is, when you saw/read it, and explain why it influenced you."
+Part 3:
+4. "In your opinion, how has the type of movies people watch changed over the past few decades?"
+5. "Do you think films should always have educational value, or is entertainment enough?"
+6. "Why do you think some local films fail to attract a global audience compared to big budget productions?"
+
+CRITICAL BEHAVIOR:
+1. Clean up and transcribe/normalize the candidate's latest response.
+2. Analyze the entire conversation history (all prompts and candidate transcripts) and the candidate's latest response to see which of the 7 standard questions have already been answered (either because they were asked, or because the candidate proactively mentioned the information).
+   - Example: If the candidate was asked question 0 (their name) and replied: "My name is Rehan, I'm from Bangalore where I graduated in Computer Science with a 9.2 CGPA, and I love playing football in my free time", then questions 0, 1, and 2 are all answered!
+3. Identify the next unanswered question in the sequence:
+   - If there are unanswered questions in Part 1 (indices 0, 1, 2), ask the next unanswered one. Set next_part=1, next_question_index=<index>.
+   - If all Part 1 questions are answered, transition to Part 2 (index 3). Set next_part=2, next_question_index=3.
+   - If Part 2 is answered, transition to Part 3 (indices 4, 5, 6). Ask the next unanswered one. Set next_part=3, next_question_index=<index>.
+   - If all questions (including Part 3) are answered, set is_test_complete=true.
+4. When asking the next question, you may contextually acknowledge their previous response (e.g. "Ah, Bangalore, a fantastic tech hub. Now, let's talk about free time...") but then immediately ask the next question.
+5. If is_test_complete is true, set next_question to "Thank you. That is the end of the speaking test." and set next_part=3, next_question_index=6.
+
+Return a JSON object conforming exactly to the response schema."""
         
         try:
             # Reconstruct chat history using types.Content
@@ -496,28 +524,50 @@ CRITICAL: Read the candidate's last input carefully. If the candidate has alread
                     parts=[types.Part(text=request.prompts[-1])]
                 ))
 
-            # Initialize Chat Session
-            chat = client.chats.create(
+            contents = list(history)
+            contents.append(types.Content(
+                role="user",
+                parts=[types.Part(text=f"Candidate response: {transcript}. Current index: {request.current_question_index}, Part: {request.current_part}.")]
+            ))
+
+            response = client.models.generate_content(
                 model="gemini-1.5-flash",
-                history=history,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
-                    temperature=0.7
+                    temperature=0.7,
+                    response_mime_type="application/json",
+                    response_schema=SpeakingNextQuestionResponse
                 )
             )
-            
-            # Send candidate transcript as the message to chat
-            user_message = f"Candidate response: {transcript}. Generate the next examiner question. Current index: {request.current_question_index}, Part: {request.current_part}."
-            response = chat.send_message(user_message)
-            next_question = response.text.strip() if response.text else ""
-        except Exception as e:
-            logger.error(f"Error generating follow-up in chat session: {e}")
-            
-    if not next_question:
-        next_idx = (request.current_question_index + 1) % len(all_questions)
-        next_question = all_questions[next_idx]
 
-    return SpeakingNextQuestionResponse(transcript=transcript, next_question=next_question)
+            if response.text:
+                response_obj = SpeakingNextQuestionResponse.model_validate_json(response.text)
+        except Exception as e:
+            logger.error(f"Error generating dynamic follow-up: {e}")
+            
+    if response_obj:
+        return response_obj
+    else:
+        # Local fallback
+        next_idx = request.current_question_index + 1
+        if next_idx >= len(all_questions):
+            return SpeakingNextQuestionResponse(
+                transcript=transcript,
+                next_question="Thank you. That is the end of the speaking test.",
+                next_part=3,
+                next_question_index=6,
+                is_test_complete=True
+            )
+        else:
+            next_part = 1 if next_idx in [0, 1, 2] else (2 if next_idx == 3 else 3)
+            return SpeakingNextQuestionResponse(
+                transcript=transcript,
+                next_question=all_questions[next_idx],
+                next_part=next_part,
+                next_question_index=next_idx,
+                is_test_complete=False
+            )
 
 
 @app.post("/api/v1/generate-listening-audio")

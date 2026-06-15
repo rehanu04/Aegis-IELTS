@@ -20,6 +20,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.content.Intent
+import android.os.Bundle
 
 /**
  * ViewModel for [IeltsSpeakingAssessmentScreen].
@@ -90,22 +95,15 @@ class SpeakingViewModel @Inject constructor(
      */
     val elapsedSeconds: StateFlow<Int> = _elapsedSeconds.asStateFlow()
 
-    // ─── Audio Amplitude ──────────────────────────────────────────────────────
+    // ─── Audio Amplitude & Speech Recognition ─────────────────────────────────
 
-    /**
-     * Normalized amplitude [0.0, 1.0] from the active audio capture session.
-     * Derived from [AudioCaptureEngine.audioFrames] via [SharedFlow.map].
-     *
-     * WhileSubscribed(5000) keeps the upstream active for 5 seconds after the
-     * last subscriber disappears (survives configuration change rotation).
-     */
-    val currentAmplitudeDb: StateFlow<Float> = audioCaptureEngine.audioFrames
-        .map { frame -> frame.amplitudeDb }
-        .stateIn(
-            scope          = viewModelScope,
-            started        = SharingStarted.WhileSubscribed(5_000L),
-            initialValue   = 0f
-        )
+    private val _liveTranscript = MutableStateFlow("")
+    val liveTranscript: StateFlow<String> = _liveTranscript.asStateFlow()
+
+    private val _currentAmplitude = MutableStateFlow(0f)
+    val currentAmplitudeDb: StateFlow<Float> = _currentAmplitude.asStateFlow()
+
+    private var speechRecognizer: android.speech.SpeechRecognizer? = null
 
     private var stateMachineJob: Job? = null
     private var timerJob: Job? = null
@@ -125,15 +123,9 @@ class SpeakingViewModel @Inject constructor(
         accumulatedTranscripts.clear()
         accumulatedPrompts.clear()
         
-        _uiState.value = SpeakingUiState.MockTestActive(
-            engineState = ExaminerEngineState.CONNECTING,
-            currentPart = 1,
-            currentQuestionIndex = 0
-        )
-        
         stateMachineJob?.cancel()
         stateMachineJob = viewModelScope.launch {
-            // Step 0: Check internet connection and ping Render backend to wake it up
+            // Step 0: Check internet connection
             val connectivityManager = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
             val network = connectivityManager?.activeNetwork
             if (network == null) {
@@ -141,10 +133,9 @@ class SpeakingViewModel @Inject constructor(
                 return@launch
             }
 
-            val pingResult = geminiRepository.pingBackend()
-            if (pingResult.isFailure) {
-                _uiState.value = SpeakingUiState.Error("Server Offline: Backend is currently unavailable. Please try again later.")
-                return@launch
+            // Warm up backend asynchronously in the background so it doesn't block startup
+            viewModelScope.launch {
+                geminiRepository.pingBackend()
             }
 
             val promptText = allQuestions[currentQuestionIdx]
@@ -187,24 +178,87 @@ class SpeakingViewModel @Inject constructor(
         // Start the elapsed time ticker
         startTimer()
 
-        // Start capturing audio
+        // Reset transcript and amplitude
+        _liveTranscript.value = ""
+        _currentAmplitude.value = 0f
+
+        // VAD parameters
+        var lastVoiceActivityTime = System.currentTimeMillis()
+
+        // Start on-device speech recognition on Main thread
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            try {
+                if (speechRecognizer == null) {
+                    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                }
+                
+                val recognizerIntent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, java.util.Locale.getDefault().toString())
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                }
+
+                speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        android.util.Log.d("SpeakingVM", "SpeechRecognizer: Ready")
+                    }
+                    override fun onBeginningOfSpeech() {
+                        lastVoiceActivityTime = System.currentTimeMillis()
+                    }
+                    override fun onRmsChanged(rmsdB: Float) {
+                        // Map rmsdB (typically -2 to 10) to [0f, 1f] for UI visualization
+                        val normalized = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                        _currentAmplitude.value = normalized
+                    }
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() {}
+                    override fun onError(error: Int) {
+                        android.util.Log.e("SpeakingVM", "SpeechRecognizer error: $error")
+                    }
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            _liveTranscript.value = matches[0]
+                        }
+                    }
+                    override fun onPartialResults(partialResults: Bundle?) {
+                        val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        if (!matches.isNullOrEmpty()) {
+                            _liveTranscript.value = matches[0]
+                            lastVoiceActivityTime = System.currentTimeMillis()
+                        }
+                    }
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+                speechRecognizer?.startListening(recognizerIntent)
+            } catch (e: Exception) {
+                android.util.Log.e("SpeakingVM", "Failed to start SpeechRecognizer: ${e.message}")
+            }
+        }
+
+        // Start capturing raw PCM audio in background
         isProcessingResponse.set(false)
         audioCaptureEngine.startCapture()
 
-        // VAD 3.5s silence monitor loop (calibrated to standard IELTS speaking speed)
-        var lastVoiceActivityTime = System.currentTimeMillis()
-        var silenceTriggered = false
+        // VAD 4.0s silence monitor loop (calibrated to standard IELTS speaking speed)
         val vadJob = viewModelScope.launch {
             audioCaptureEngine.audioFrames.collect { frame ->
                 if (isProcessingResponse.get()) return@collect
+                
+                // Fallback amplitude mapping from PCM capture if SpeechRecognizer isn't active
+                if (_currentAmplitude.value == 0f) {
+                    _currentAmplitude.value = frame.amplitudeDb
+                }
+
                 val rawDb = frame.amplitudeDb * 96f - 96f
-                if (rawDb >= -40f) {
+                if (rawDb >= -35f) { // Calibrated from -40f to -35f
                     lastVoiceActivityTime = System.currentTimeMillis()
                 } else {
                     val silenceDurationMs = System.currentTimeMillis() - lastVoiceActivityTime
-                    if (silenceDurationMs >= 3500L) { // 3.5 seconds
+                    if (silenceDurationMs >= 4000L) { // Calibrated from 3.5s to 4.0s
                         if (isProcessingResponse.compareAndSet(false, true)) {
-                            silenceTriggered = true
+                            android.util.Log.d("SpeakingVM", "Silence detection triggered at 4.0s")
                         }
                     }
                 }
@@ -214,30 +268,41 @@ class SpeakingViewModel @Inject constructor(
         // Wait for max 120 seconds or until silence detection triggers
         val maxDurationMs = 120_000L
         val startTime = System.currentTimeMillis()
-        while (System.currentTimeMillis() - startTime < maxDurationMs && !silenceTriggered) {
+        while (System.currentTimeMillis() - startTime < maxDurationMs && !isProcessingResponse.get()) {
             delay(100)
         }
         isProcessingResponse.set(true) // Ensure locked if timeout occurs
+        
+        // Stop speech recognition
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            try {
+                speechRecognizer?.stopListening()
+            } catch (e: Exception) {
+                android.util.Log.e("SpeakingVM", "Error stopping SpeechRecognizer: ${e.message}")
+            }
+        }
         vadJob.cancel()
 
-        // Step 3: Stop capture
+        // Stop capture
         val audioBytes = audioCaptureEngine.stopCapture()
         val telemetry = audioCaptureEngine.silenceTelemetry
         stopTimer()
 
         // Show loading state while communication with backend takes place
+        // Transition to ExaminerEngineState.ANALYZING with empty prompt to suppress TTS thinking audio
         _uiState.value = SpeakingUiState.MockTestActive(
-            engineState = ExaminerEngineState.EXAMINER_SPEAKING,
-            promptText = "Let me think about that...",
+            engineState = ExaminerEngineState.ANALYZING,
+            promptText = "",
             currentPart = activePart,
             currentQuestionIndex = activeQuestionIdx
         )
 
         // Launch network request to get the follow-up question
+        val finalTranscript = _liveTranscript.value
         val audioBase64 = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
         val request = SpeakingNextQuestionRequest(
             audio_base64 = audioBase64,
-            previous_transcript = null,
+            previous_transcript = finalTranscript.ifBlank { null },
             current_question_index = currentQuestionIdx,
             current_part = activePart,
             prompts = accumulatedPrompts + currentState.promptText,
@@ -250,22 +315,21 @@ class SpeakingViewModel @Inject constructor(
                 accumulatedTranscripts.add(response.transcript)
                 accumulatedPrompts.add(currentState.promptText)
 
-                if (currentQuestionIdx < 6) {
-                    currentQuestionIdx++
-                    val nextPart = if (currentQuestionIdx in 0..2) 1 else if (currentQuestionIdx == 3) 2 else 3
+                if (!response.is_test_complete) {
+                    currentQuestionIdx = response.next_question_index
                     
                     _uiState.value = SpeakingUiState.MockTestActive(
                         engineState = ExaminerEngineState.EXAMINER_SPEAKING,
                         promptText = response.next_question,
-                        currentPart = nextPart,
+                        currentPart = response.next_part,
                         currentQuestionIndex = currentQuestionIdx
                     )
                 } else {
-                    // End of Part 3. Evaluate the entire combined transcripts and prompts!
+                    // End of Speaking test. Evaluate the entire combined transcripts and prompts!
                     _uiState.value = SpeakingUiState.MockTestActive(
                         engineState = ExaminerEngineState.ANALYZING,
                         promptText = "Evaluating Speaking Performance...",
-                        currentPart = 3,
+                        currentPart = response.next_part,
                         currentQuestionIndex = currentQuestionIdx
                     )
 
@@ -287,7 +351,7 @@ class SpeakingViewModel @Inject constructor(
                             _uiState.value = SpeakingUiState.MockTestActive(
                                 engineState = ExaminerEngineState.EXAMINER_SPEAKING,
                                 promptText = finalResponse.overallFeedback,
-                                currentPart = 3,
+                                currentPart = response.next_part,
                                 currentQuestionIndex = currentQuestionIdx
                             )
                         }.onFailure { error ->
@@ -328,6 +392,10 @@ class SpeakingViewModel @Inject constructor(
         stopTimer()
         audioCaptureEngine.stopCapture()  // Discard audio; no evaluation
         
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+        _liveTranscript.value = ""
+        
         viewModelScope.launch {
             audioPlaybackEngine.stop()
         }
@@ -348,6 +416,8 @@ class SpeakingViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
         audioPlaybackEngine.release()
     }
 }

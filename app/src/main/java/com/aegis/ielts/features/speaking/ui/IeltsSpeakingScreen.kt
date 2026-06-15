@@ -48,6 +48,7 @@ fun IeltsSpeakingAssessmentScreen(
     val currentUiState by viewModel.uiState.collectAsStateWithLifecycle()
     val elapsedSeconds by viewModel.elapsedSeconds.collectAsStateWithLifecycle()
     val rawAmplitudeDb by viewModel.currentAmplitudeDb.collectAsStateWithLifecycle()
+    val liveTranscript by viewModel.liveTranscript.collectAsStateWithLifecycle()
 
     var tts by remember { mutableStateOf<android.speech.tts.TextToSpeech?>(null) }
     var ttsInitialized by remember { mutableStateOf(false) }
@@ -308,10 +309,33 @@ fun IeltsSpeakingAssessmentScreen(
 
                         // Active physics-driven waveform rendering during live candidate speech
                         if (state.engineState == ExaminerEngineState.CANDIDATE_RECORDING) {
-                            AudioWaveformVisualizer(
-                                amplitudeDb = rawAmplitudeDb,
-                                modifier = Modifier.padding(horizontal = 32.dp).bottomSpace()
-                            )
+                            Column(
+                                modifier = Modifier.height(250.dp).fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = liveTranscript,
+                                        style = MaterialTheme.typography.bodyLarge.copy(
+                                            fontWeight = FontWeight.Normal,
+                                            lineHeight = 22.sp
+                                        ),
+                                        color = Color.LightGray,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                                Spacer(Modifier.height(16.dp))
+                                AudioWaveformVisualizer(
+                                    amplitudeDb = rawAmplitudeDb,
+                                    modifier = Modifier.padding(horizontal = 32.dp).padding(bottom = 16.dp)
+                                )
+                            }
                         } else {
                             Spacer(Modifier.height(250.dp)) // Maintain canvas constraints to block layout shifts
                         }

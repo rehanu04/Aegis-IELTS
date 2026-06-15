@@ -102,13 +102,18 @@ class AudioCaptureEngine @Inject constructor() {
         synchronized(capturedFrames) { capturedFrames.clear() }
         resetSilenceTelemetry()
 
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            CHANNEL_CONFIG,
-            AUDIO_FORMAT,
-            bufferSize * 4   // 4× headroom to prevent buffer overrun on slow devices
-        ).also { it.startRecording() }
+        try {
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                SAMPLE_RATE,
+                CHANNEL_CONFIG,
+                AUDIO_FORMAT,
+                bufferSize * 4   // 4× headroom to prevent buffer overrun on slow devices
+            ).also { it.startRecording() }
+        } catch (e: Exception) {
+            android.util.Log.e("AudioCaptureEngine", "Failed to start AudioRecord: ${e.message}")
+            audioRecord = null
+        }
 
         captureJob = engineScope.launch {
             val readBuffer = ShortArray(bufferSize)
@@ -123,6 +128,8 @@ class AudioCaptureEngine @Inject constructor() {
                     updateSilenceTelemetry(amplitudeDb)
 
                     _audioFrames.emit(AudioFrame(frame, normalizedAmplitude))
+                } else {
+                    kotlinx.coroutines.delay(100L)
                 }
             }
         }
@@ -228,8 +235,17 @@ class AudioCaptureEngine @Inject constructor() {
      */
     private fun computeAmplitudeDb(buffer: ShortArray): Float {
         if (buffer.isEmpty()) return -96f
-        val sumOfSquares = buffer.fold(0.0) { acc, s -> acc + s.toDouble() * s }
-        val rms          = sqrt(sumOfSquares / buffer.size).toFloat()
+        var sum = 0.0
+        for (sample in buffer) {
+            sum += sample
+        }
+        val mean = sum / buffer.size
+        var sumOfSquares = 0.0
+        for (sample in buffer) {
+            val diff = sample - mean
+            sumOfSquares += diff * diff
+        }
+        val rms = sqrt(sumOfSquares / buffer.size).toFloat()
         return if (rms > 0f) (20f * log10(rms / 32_768f)).coerceAtLeast(-96f) else -96f
     }
 

@@ -275,5 +275,8 @@ data class SpeakingNextQuestionRequest(
 @Serializable
 data class SpeakingNextQuestionResponse(
     val transcript: String,
-    val next_question: String
+    val next_question: String,
+    val next_part: Int,
+    val next_question_index: Int,
+    val is_test_complete: Boolean
 )
