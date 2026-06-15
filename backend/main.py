@@ -495,10 +495,13 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
         system_instruction = f"""You are a Certified Senior, Professional IELTS Academic Oral Examiner conducting a true two-way human dialogue.
 Your conversation flow must adapt dynamically to the candidate's speech transcript.
 
-[CRITICAL DIRECTIVE] 
-You are a human IELTS Oral Examiner. You are strictly forbidden from asking redundant questions. 
-If the candidate has already stated their name, hometown/city, or educational status in a previous turn, you MUST NOT ask the stock introductory questions: "Where are you from?", "Do you work or study?", or "What is your full name?".
-Instead, you are required to acknowledge their exact stated background explicitly (e.g., 'I see you studied Computer Science with a focus on AI/ML in Bangalore—a very fast-growing field.') and instantly steer the interview forward into a dynamic follow-up or a higher-tier Part 1 abstract topic (e.g., 'How has your home city changed since you grew up there?' or 'What made you choose to specialize in Artificial Intelligence?').
+[CRITICAL EXECUTION RULES]
+- You are a senior, highly adaptive, certified human IELTS Oral Examiner conducting a natural, two-way interview.
+- You are strictly forbidden from acting like a static script or a sequential question checklist.
+- You must execute a strict semantic analysis on the candidate's incoming transcript before generating your reply. 
+- If the candidate's response contextually resolves basic introductory milestones (e.g., they mention living in Bangalore, studying or graduating with a Bachelor's degree, engineering, CSE, AI/ML, or college stats), you must dynamically STRIKE OUT those generic boilerplate questions ("Where are you from?", "Do you study or work?") from your interview pool entirely.
+- Acknowledge their specific educational and geographical background naturally (e.g., 'An 8.86 CGPA in AI/ML from VVIT is an excellent foundation, especially in a technology hub like Bangalore...').
+- Instantly pivot the conversation forward by asking a direct, high-tier contextual follow-up question based on their exact words (e.g., 'What inspired you to specialize specifically in Artificial Intelligence during your engineering degree?' or 'How do you feel the growth of the tech industry has transformed Bangalore recently?').
 {extra_directives}
 
 The standard exam itinerary contains these 7 questions:
@@ -552,7 +555,12 @@ Return a JSON object conforming exactly to the response schema."""
             contents = list(history)
             contents.append(types.Content(
                 role="user",
-                parts=[types.Part(text=f"Candidate response: {transcript}. Current index: {request.current_question_index}, Part: {request.current_part}.")]
+                parts=[types.Part(text=f"""Candidate response: {transcript}. 
+Current index: {request.current_question_index}, Part: {request.current_part}.
+Location Resolved: {location_resolved}
+Education/Employment Resolved: {education_employment_resolved}
+
+Generate the next dynamic, context-aware examiner question in JSON format conforming to SpeakingNextQuestionResponse.""")]
             ))
 
             response = client.models.generate_content(
@@ -574,8 +582,16 @@ Return a JSON object conforming exactly to the response schema."""
     if response_obj:
         return response_obj
     else:
-        # Local fallback
+        # Local fallback with dynamic question skipping
         next_idx = request.current_question_index + 1
+        if next_idx == 1:
+            if location_resolved and education_employment_resolved:
+                next_idx = 2
+            elif location_resolved:
+                all_questions[1] = "Do you work or study?"
+            elif education_employment_resolved:
+                all_questions[1] = "Where are you from?"
+
         if next_idx >= len(all_questions):
             return SpeakingNextQuestionResponse(
                 transcript=transcript,
