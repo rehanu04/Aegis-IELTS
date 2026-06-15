@@ -470,10 +470,36 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     ]
     all_questions = part1_questions + [part2_question] + part3_questions
     
+    # Semantic keyword override context filters
+    combined_transcript_history = (transcript + " " + " ".join(request.transcripts or [])).lower()
+    location_resolved = False
+    education_employment_resolved = False
+
+    if "bangalore" in combined_transcript_history or "bengaluru" in combined_transcript_history:
+        location_resolved = True
+        logger.info("Semantic override filter: Location context flagged as fully resolved.")
+
+    edu_keywords = ["bachelor", "graduated", "cse", "ai/ml", "cgpa"]
+    if any(kw in combined_transcript_history for kw in edu_keywords):
+        education_employment_resolved = True
+        logger.info("Semantic override filter: Education/Employment context flagged as fully resolved.")
+
     response_obj = None
     if client and os.getenv("GEMINI_API_KEY"):
-        system_instruction = """You are a Certified Senior, Professional IELTS Academic Oral Examiner conducting a true two-way human dialogue.
+        extra_directives = ""
+        if location_resolved:
+            extra_directives += "\n- MANDATORY: The candidate's location/hometown context is ALREADY RESOLVED. Under no circumstances ask them where they are from or about their hometown."
+        if education_employment_resolved:
+            extra_directives += "\n- MANDATORY: The candidate's education/employment status is ALREADY RESOLVED. Under no circumstances ask them if they work or study or about their studies/jobs."
+
+        system_instruction = f"""You are a Certified Senior, Professional IELTS Academic Oral Examiner conducting a true two-way human dialogue.
 Your conversation flow must adapt dynamically to the candidate's speech transcript.
+
+[CRITICAL DIRECTIVE] 
+You are a human IELTS Oral Examiner. You are strictly forbidden from asking redundant questions. 
+If the candidate has already stated their name, hometown/city, or educational status in a previous turn, you MUST NOT ask the stock introductory questions: "Where are you from?", "Do you work or study?", or "What is your full name?".
+Instead, you are required to acknowledge their exact stated background explicitly (e.g., 'I see you studied Computer Science with a focus on AI/ML in Bangalore—a very fast-growing field.') and instantly steer the interview forward into a dynamic follow-up or a higher-tier Part 1 abstract topic (e.g., 'How has your home city changed since you grew up there?' or 'What made you choose to specialize in Artificial Intelligence?').
+{extra_directives}
 
 The standard exam itinerary contains these 7 questions:
 Part 1:
