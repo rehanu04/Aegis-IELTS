@@ -483,8 +483,7 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
     location_resolved = False
     education_employment_resolved = False
 
-    # Location indicators: checking for "from [some city/country]", "live in", "living in", "reside in", "hometown", "born/raised in",
-    # or specific common indian/international location keywords.
+    # Location indicators: checking for hometown, city, country, or specific common locations
     location_indicators = [
         "from", "live in", "living in", "reside in", "residing in", "hometown",
         "born in", "raised in", "came from", "located in", "place called",
@@ -497,7 +496,7 @@ async def speaking_next_question(request: SpeakingNextQuestionRequest):
         location_resolved = True
         logger.info("Semantic override filter: Location context flagged as fully resolved.")
 
-    # Education/employment indicators: checking for graduation, study, work, engineering, job, CSE, etc.
+    # Education/employment indicators: checking for graduation, study, work, engineering, job, college, etc.
     edu_employment_indicators = [
         "bachelor", "master", "graduated", "graduate", "graduation", "degree",
         "cse", "ai/ml", "cgpa", "gpa", "percentage", "engineering", "engineer",
@@ -522,35 +521,41 @@ Your conversation flow must adapt dynamically to the candidate's speech transcri
 
 [CRITICAL EXECUTION RULES]
 - You are a senior, highly adaptive, certified human IELTS Oral Examiner conducting a natural, two-way interview.
-- You are strictly forbidden from acting like a static script or a sequential question checklist.
-- You must execute a strict semantic analysis on the candidate's incoming transcript before generating your reply. 
-- If the candidate's response contextually resolves basic introductory milestones (e.g., they mention living in Bangalore, studying or graduating with a Bachelor's degree, engineering, CSE, AI/ML, or college stats), you must dynamically STRIKE OUT those generic boilerplate questions ("Where are you from?", "Do you study or work?") from your interview pool entirely.
+- You must dynamically adjust the questions based on what the candidate has already said.
+- Never ask a candidate for information they have already provided.
+- If the candidate proactively supplies information (e.g. stating name, city, department, graduation CGPA, and college specialization) that matches upcoming generic introductory prompts (Hometown/Location, Work/Study), you must dynamically skip/strike off those redundant questions from your itinerary.
 - Acknowledge their specific educational and geographical background naturally (e.g., 'An 8.86 CGPA in AI/ML from VVIT is an excellent foundation, especially in a technology hub like Bangalore...').
-- Instantly pivot the conversation forward by asking a direct, high-tier contextual follow-up question based on their exact words (e.g., 'What inspired you to specialize specifically in Artificial Intelligence during your engineering degree?' or 'How do you feel the growth of the tech industry has transformed Bangalore recently?').
+- Instantly pivot the conversation forward by asking a direct, high-tier contextual follow-up question based on their exact words.
 {extra_directives}
 
-The standard exam itinerary contains these 7 questions:
-Part 1:
-0. "Welcome to the IELTS speaking test. Can you tell me your full name, please?"
-1. "Where are you from, and do you work or study?"
-2. "Let's talk about your free time. What hobbies do you enjoy the most?"
-Part 2:
-3. "Describe a book or a movie that had a strong influence on you. You should say what it is, when you saw/read it, and explain why it influenced you."
-Part 3:
-4. "In your opinion, how has the type of movies people watch changed over the past few decades?"
-5. "Do you think films should always have educational value, or is entertainment enough?"
-6. "Why do you think some local films fail to attract a global audience compared to big budget productions?"
+[TEST ITINERARY & INDEX MAPPING]
+- Progress of the interview maps to an index counter (0 to 6):
+  - Index 0 (Part 1): Welcome / Name confirmation.
+  - Index 1 (Part 1): Hometown / Work / Study status.
+  - Index 2 (Part 1): Hobbies / Free time / general interests.
+  - Index 3 (Part 2): Cue Card topic: "Describe a book or a movie that had a strong influence on you. You should say what it is, when you saw/read it, and explain why it influenced you."
+  - Index 4 (Part 3): Abstract discussion about films/art/culture (e.g., change in types of movies people watch).
+  - Index 5 (Part 3): Abstract discussion (e.g., educational value vs entertainment).
+  - Index 6 (Part 3): Abstract discussion (e.g., local films failing globally).
 
-CRITICAL BEHAVIOR:
-1. Clean up and transcribe/normalize the candidate's latest response.
-2. Critically read the candidate's full response. If the candidate proactively supplies information (e.g. stating name, city, department, graduation CGPA, and college specialization) that matches upcoming generic introductory prompts, you must dynamically skip/strike off those redundant questions from your itinerary. Never ask a candidate for information they have already provided.
-3. You must "catch" something contextually specific from what the candidate said, comment on it naturally (e.g. acknowledging an engineering specialization, or their location in Bangalore), and formulate a tailored follow-up question before routing back to the core thematic modules.
-4. Identify the next unanswered question in the sequence:
-   - If there are unanswered questions in Part 1 (indices 0, 1, 2), ask the next unanswered one. Set next_part=1, next_question_index=<index>.
-   - If all Part 1 questions are answered, transition to Part 2 (index 3). Set next_part=2, next_question_index=3.
-   - If Part 2 is answered, transition to Part 3 (indices 4, 5, 6). Ask the next unanswered one. Set next_part=3, next_question_index=<index>.
-   - If all questions (including Part 3) are answered, set is_test_complete=true.
-5. If is_test_complete is true, set next_question to "Thank you. That is the end of the speaking test." and set next_part=3, next_question_index=6.
+[TRANSITION & SEQUENCE RULES]
+- If request.current_question_index is 0:
+  - If location and work/study are ALREADY RESOLVED (location_resolved={location_resolved}, education_resolved={education_employment_resolved}): Skip index 1 entirely. Transition to index 2. Ask a dynamic, context-aware question about hobbies. Set next_question_index=2, next_part=1.
+  - If location is resolved but work/study is not: Ask a question targeting work/study. Set next_question_index=1, next_part=1.
+  - If work/study is resolved but location is not: Ask a question targeting location/hometown. Set next_question_index=1, next_part=1.
+  - If neither is resolved: Ask the standard index 1 question ("Where are you from, and do you work or study?"). Set next_question_index=1, next_part=1.
+- If request.current_question_index is 1:
+  - Transition to index 2. Formulate a dynamic question about hobbies/free time. Set next_question_index=2, next_part=1.
+- If request.current_question_index is 2:
+  - Transition to Part 2 (index 3). Ask the candidate to describe a book or a movie that influenced them (Cue Card). Set next_question_index=3, next_part=2.
+- If request.current_question_index is 3:
+  - Transition to Part 3 (index 4). Formulate an abstract follow-up discussion question related to films/media. Set next_question_index=4, next_part=3.
+- If request.current_question_index is 4:
+  - Transition to index 5. Formulate an abstract follow-up discussion question (e.g. educational value of films). Set next_question_index=5, next_part=3.
+- If request.current_question_index is 5:
+  - Transition to index 6. Formulate an abstract follow-up discussion question (e.g. local vs global films). Set next_question_index=6, next_part=3.
+- If request.current_question_index is 6:
+  - The speaking test is complete. Set is_test_complete=true, next_question="Thank you. That is the end of the speaking test.", next_part=3, next_question_index=6.
 
 Return a JSON object conforming exactly to the response schema."""
         
@@ -597,18 +602,17 @@ Generate the next dynamic, context-aware examiner question in JSON format confor
                     if response_obj.next_question_index == 1:
                         logger.warning("Gemini output next_question_index=1 but both location and education are resolved. Force skipping to index 2.")
                         response_obj.next_question_index = 2
-                        response_obj.next_question = all_questions[2]
                         response_obj.next_part = 1
+                        if not any(kw in response_obj.next_question.lower() for kw in ["hobby", "hobbies", "free time", "spare time", "enjoy", "like to do"]):
+                            response_obj.next_question = "Let's talk about your free time. What hobbies do you enjoy the most?"
                 elif location_resolved:
                     if response_obj.next_question_index == 1:
-                        # Ensure we don't ask location since it is resolved
-                        if "where" in response_obj.next_question.lower() or "from" in response_obj.next_question.lower():
+                        if any(kw in response_obj.next_question.lower() for kw in ["where are you from", "hometown", "where do you live", "where you from"]):
                             logger.warning("Gemini output location prompt for index 1, but location is resolved. Correcting question to education query.")
                             response_obj.next_question = "Do you work or study?"
                 elif education_employment_resolved:
                     if response_obj.next_question_index == 1:
-                        # Ensure we don't ask work/study since it is resolved
-                        if "work" in response_obj.next_question.lower() or "study" in response_obj.next_question.lower():
+                        if any(kw in response_obj.next_question.lower() for kw in ["work or study", "do you work", "do you study", "job or education", "job or study"]):
                             logger.warning("Gemini output education prompt for index 1, but education is resolved. Correcting question to location query.")
                             response_obj.next_question = "Where are you from?"
         except Exception as e:
@@ -619,13 +623,15 @@ Generate the next dynamic, context-aware examiner question in JSON format confor
     else:
         # Local fallback with dynamic question skipping
         next_idx = request.current_question_index + 1
-        if next_idx == 1:
+        if request.current_question_index == 0:
             if location_resolved and education_employment_resolved:
                 next_idx = 2
-            elif location_resolved:
-                all_questions[1] = "Do you work or study?"
-            elif education_employment_resolved:
-                all_questions[1] = "Where are you from?"
+            else:
+                next_idx = 1
+                if location_resolved:
+                    all_questions[1] = "Do you work or study?"
+                elif education_employment_resolved:
+                    all_questions[1] = "Where are you from?"
 
         if next_idx >= len(all_questions):
             return SpeakingNextQuestionResponse(

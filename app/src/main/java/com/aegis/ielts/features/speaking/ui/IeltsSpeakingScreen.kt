@@ -400,7 +400,11 @@ fun ParticleBlobOrb(
         else -> Color(0xFF008080)        // Teal for Idle
     }
 
-    val coreColor by animateColorAsState(targetValue = targetColor, animationSpec = tween(1500), label = "OrbCoreColor")
+    val coreColor by animateColorAsState(
+        targetValue = targetColor,
+        animationSpec = tween(500, easing = FastOutSlowInEasing),
+        label = "OrbCoreColor"
+    )
 
     var rotX by remember { mutableFloatStateOf(0f) }
     var rotY by remember { mutableFloatStateOf(0f) }
@@ -425,18 +429,47 @@ fun ParticleBlobOrb(
         }
     }
 
-    val targetBounce = if (isTalking) 0.15f else if (isListening) (0.08f + amplitude * 0.25f) else 0.02f
+    // Smooth microphone amplitude using responsive spring physics
+    val springAmp by animateFloatAsState(
+        targetValue = amplitude,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "OrbSpringAmp"
+    )
+
+    val targetBounce = if (isTalking) 0.15f else if (isListening) (0.08f + springAmp * 0.25f) else 0.02f
     val currentBounce by animateFloatAsState(
         targetValue = targetBounce,
-        animationSpec = tween(400, easing = FastOutSlowInEasing),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
         label = "OrbBounce"
     )
 
-    Canvas(modifier = modifier.fillMaxSize()) {
-        val numPoints = 800
+    val numPoints = 800
+
+    // Precalculate and cache static unit-sphere coordinates to avoid heavy acos/sin/cos calculations in the draw loop
+    val spherePoints = remember(numPoints) {
+        val points = FloatArray(numPoints * 3)
         val goldenRatio = (1.0 + kotlin.math.sqrt(5.0)) / 2.0
         val angleIncrement = Math.PI * 2.0 * goldenRatio
+        for (i in 0 until numPoints) {
+            val t = i.toDouble() / numPoints.toDouble()
+            val phi = kotlin.math.acos(1.0 - 2.0 * t)
+            val theta = angleIncrement * i
 
+            val sinPhi = kotlin.math.sin(phi)
+            points[i * 3] = (sinPhi * kotlin.math.cos(theta)).toFloat()     // x
+            points[i * 3 + 1] = (sinPhi * kotlin.math.sin(theta)).toFloat() // y
+            points[i * 3 + 2] = (kotlin.math.cos(phi)).toFloat()            // z
+        }
+        points
+    }
+
+    Canvas(modifier = modifier.fillMaxSize()) {
         val radius = size.width / 3.4f
         val center = Offset(size.width / 2, size.height / 2)
         val focalLength = radius * 3.0f
@@ -459,24 +492,29 @@ fun ParticleBlobOrb(
         val rotX_D = rotX.toDouble()
         val rotY_D = rotY.toDouble()
 
+        // Hoist rotation matrix constant calculations out of the 800-point iteration loop
+        val cosZ = kotlin.math.cos(rotZ_D).toFloat()
+        val sinZ = kotlin.math.sin(rotZ_D).toFloat()
+        val cosX = kotlin.math.cos(rotX_D).toFloat()
+        val sinX = kotlin.math.sin(rotX_D).toFloat()
+        val cosY = kotlin.math.cos(rotY_D).toFloat()
+        val sinY = kotlin.math.sin(rotY_D).toFloat()
+
+        val waveSpeed = if (isTalking) 8f else 3f
+        val wTime = waveTime * waveSpeed
+
         for (i in 0 until numPoints) {
-            val t = i.toDouble() / numPoints.toDouble()
-            val phi = kotlin.math.acos(1.0 - 2.0 * t)
-            val theta = angleIncrement * i
+            val startX = spherePoints[i * 3]
+            val startY = spherePoints[i * 3 + 1]
+            val startZ = spherePoints[i * 3 + 2]
 
-            val startX = (kotlin.math.sin(phi) * kotlin.math.cos(theta)).toFloat()
-            val startY = (kotlin.math.sin(phi) * kotlin.math.sin(theta)).toFloat()
-            val startZ = (kotlin.math.cos(phi)).toFloat()
-
-            val x1 = (startX * kotlin.math.cos(rotZ_D) - startY * kotlin.math.sin(rotZ_D)).toFloat()
-            val y1 = (startX * kotlin.math.sin(rotZ_D) + startY * kotlin.math.cos(rotZ_D)).toFloat()
-            val y2 = (y1 * kotlin.math.cos(rotX_D) - startZ * kotlin.math.sin(rotX_D)).toFloat()
-            val z2 = (y1 * kotlin.math.sin(rotX_D) + startZ * kotlin.math.cos(rotX_D)).toFloat()
-            val finalX = (x1 * kotlin.math.cos(rotY_D) - z2 * kotlin.math.sin(rotY_D)).toFloat()
-            val finalZ = (x1 * kotlin.math.sin(rotY_D) + z2 * kotlin.math.cos(rotY_D)).toFloat()
-
-            val waveSpeed = if (isTalking) 8f else 3f
-            val wTime = waveTime * waveSpeed
+            // Efficient matrix multiplication using hoisted frame constants
+            val x1 = startX * cosZ - startY * sinZ
+            val y1 = startX * sinZ + startY * cosZ
+            val y2 = y1 * cosX - startZ * sinX
+            val z2 = y1 * sinX + startZ * cosX
+            val finalX = x1 * cosY - z2 * sinY
+            val finalZ = x1 * sinY + z2 * cosY
 
             val waveX = kotlin.math.sin((finalX * 4f + wTime).toDouble()).toFloat()
             val waveY = kotlin.math.cos((y2 * 4f - wTime * 0.8f).toDouble()).toFloat()
